@@ -165,6 +165,9 @@ check_dependencies() {
     log STEP "Checking build dependencies"
     
     local deps=(
+        git
+        wget
+        curl
         debootstrap
         squashfs-tools
         xorriso
