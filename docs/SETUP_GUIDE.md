@@ -43,8 +43,8 @@ This guide covers the complete installation and configuration of DisplayOS, a li
 ### Step 1: Clone the Repository
 
 ```bash
-git clone https://github.com/yourusername/displayos.git
-cd displayos
+git clone https://github.com/OnlyDrey/DisplayOS.git
+cd DisplayOS
 ```
 
 ### Step 2: Install Build Dependencies
@@ -54,6 +54,9 @@ The build script will automatically install dependencies, but you can pre-instal
 ```bash
 sudo apt-get update
 sudo apt-get install -y \
+    git \
+    wget \
+    curl \
     debootstrap \
     squashfs-tools \
     xorriso \
