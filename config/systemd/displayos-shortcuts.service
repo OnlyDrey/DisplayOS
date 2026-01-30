@@ -1,0 +1,35 @@
+# DisplayOS Keyboard Shortcuts Service
+# =====================================
+# Location: /etc/systemd/system/displayos-shortcuts.service
+#
+# This service manages global keyboard shortcuts
+# Shortcuts:
+#   F5              - Reload browser
+#   Ctrl+Alt+Del    - Exit kiosk mode (requires password)
+#   Ctrl+Alt+K      - Toggle virtual keyboard
+#   Ctrl+Alt+W      - Open Network Manager GUI
+
+[Unit]
+Description=DisplayOS Keyboard Shortcuts Handler
+Documentation=https://github.com/yourusername/displayos
+After=graphical.target
+Requires=graphical.target
+
+[Service]
+Type=simple
+User=displayos
+Group=displayos
+
+# Environment
+Environment=DISPLAY=:0
+Environment=XAUTHORITY=/home/displayos/.Xauthority
+
+# Shortcut handler script
+ExecStart=/usr/local/bin/displayos-shortcuts
+
+# Restart configuration
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=graphical.target

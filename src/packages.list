@@ -1,0 +1,222 @@
+# DisplayOS Package List
+# ======================
+# Minimal Debian packages for kiosk/digital signage deployment
+# 
+# Format: one package per line
+# Lines starting with # are comments
+# Empty lines are ignored
+
+# =============================================================================
+# CORE SYSTEM
+# =============================================================================
+
+# Base system utilities
+sudo
+systemd
+systemd-sysv
+dbus
+udev
+
+# Init and boot
+grub-pc
+grub-efi-amd64
+grub-efi-amd64-signed
+shim-signed
+efibootmgr
+
+# Filesystem support
+dosfstools
+e2fsprogs
+xfsprogs
+ntfs-3g
+
+# Compression and archives
+xz-utils
+bzip2
+gzip
+unzip
+squashfs-tools
+
+# =============================================================================
+# DISPLAY AND GRAPHICS
+# =============================================================================
+
+# X.Org display server (minimal)
+xserver-xorg-core
+xserver-xorg-input-all
+xserver-xorg-video-all
+x11-xserver-utils
+xinit
+xauth
+
+# Display manager (lightweight)
+lightdm
+lightdm-gtk-greeter
+
+# Window manager (minimal, for kiosk)
+openbox
+obconf
+
+# Desktop utilities
+xdotool
+xclip
+x11-utils
+
+# Fonts
+fonts-dejavu-core
+fonts-liberation
+fonts-noto-core
+
+# =============================================================================
+# BROWSERS
+# =============================================================================
+
+# Primary browser
+chromium
+chromium-sandbox
+
+# Fallback browser
+firefox-esr
+
+# =============================================================================
+# NETWORK
+# =============================================================================
+
+# NetworkManager and tools
+network-manager
+network-manager-gnome
+nm-tray
+
+# Wireless tools
+wireless-tools
+wpasupplicant
+iw
+rfkill
+
+# Network utilities
+iproute2
+iputils-ping
+curl
+wget
+ca-certificates
+openssl
+
+# DNS utilities
+dnsutils
+
+# =============================================================================
+# SECURITY
+# =============================================================================
+
+# Firewall
+ufw
+
+# AppArmor
+apparmor
+apparmor-utils
+apparmor-profiles
+apparmor-profiles-extra
+
+# Automatic updates
+unattended-upgrades
+apt-listchanges
+
+# Encryption (for installed systems)
+cryptsetup
+cryptsetup-initramfs
+
+# SSH (for remote management, disabled by default)
+openssh-server
+
+# =============================================================================
+# INPUT DEVICES
+# =============================================================================
+
+# Virtual keyboard for touchscreens
+onboard
+at-spi2-core
+
+# =============================================================================
+# SYSTEM UTILITIES
+# =============================================================================
+
+# Process management
+htop
+psmisc
+
+# Text editors
+nano
+
+# File utilities
+coreutils
+findutils
+grep
+sed
+gawk
+
+# Hardware info
+pciutils
+usbutils
+lshw
+
+# Time synchronization
+systemd-timesyncd
+
+# Logging
+rsyslog
+
+# =============================================================================
+# LIVE SYSTEM TOOLS
+# =============================================================================
+
+# Live boot support
+live-boot
+live-boot-initramfs-tools
+live-config
+live-config-systemd
+
+# ISO creation
+xorriso
+isolinux
+syslinux-common
+syslinux-efi
+
+# =============================================================================
+# INSTALLER (for installed mode)
+# =============================================================================
+
+# Debian installer components (minimal)
+debootstrap
+parted
+
+# =============================================================================
+# LOCALIZATION
+# =============================================================================
+
+# Console setup
+console-setup
+keyboard-configuration
+
+# Locale support
+locales
+
+# =============================================================================
+# OPTIONAL HARDWARE SUPPORT
+# =============================================================================
+
+# Audio (for video content with sound)
+pulseaudio
+alsa-utils
+
+# GPU drivers
+mesa-utils
+
+# =============================================================================
+# DEVELOPMENT/DEBUG (remove for production)
+# =============================================================================
+
+# Uncomment these for debugging builds
+# vim
+# strace
+# gdb
+# less

@@ -1,0 +1,35 @@
+# DisplayOS Watchdog Service
+# ==========================
+# Location: /etc/systemd/system/displayos-watchdog.service
+#
+# This service monitors the browser process and restarts it if crashed
+# Enable with: sudo systemctl enable displayos-watchdog
+# Start with: sudo systemctl start displayos-watchdog
+
+[Unit]
+Description=DisplayOS Browser Watchdog Service
+Documentation=https://github.com/yourusername/displayos
+After=displayos-kiosk.service
+BindsTo=displayos-kiosk.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+
+# Read configuration for timeout value
+EnvironmentFile=/etc/displayos/config.conf
+
+# Watchdog script
+ExecStart=/usr/local/bin/displayos-watchdog
+
+# Restart configuration
+Restart=always
+RestartSec=10
+
+# Logging
+StandardOutput=append:/var/log/displayos/watchdog.log
+StandardError=append:/var/log/displayos/watchdog.log
+
+[Install]
+WantedBy=multi-user.target

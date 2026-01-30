@@ -1,0 +1,8 @@
+# Logo Placeholder
+
+Replace this file with your actual logo image (logo-placeholder.png).
+
+Recommended specifications:
+- Size: 256x256 pixels
+- Format: PNG with transparency
+- Background: Transparent

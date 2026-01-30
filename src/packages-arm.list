@@ -1,0 +1,70 @@
+# DisplayOS ARM Package List
+# ==========================
+# Additional/replacement packages for ARM architecture (Raspberry Pi, etc.)
+#
+# This file is used IN ADDITION to packages.list for ARM builds
+# Some packages from packages.list may be substituted
+
+# =============================================================================
+# BOOT (ARM-specific)
+# =============================================================================
+
+# Replace GRUB with ARM bootloader
+# grub-efi-arm64 (if building for arm64 UEFI)
+
+# Raspberry Pi specific
+raspi-firmware
+rpi-eeprom
+
+# U-Boot for generic ARM
+u-boot-tools
+
+# =============================================================================
+# GPU DRIVERS (ARM)
+# =============================================================================
+
+# Raspberry Pi GPU
+libraspberrypi0
+libraspberrypi-bin
+
+# Mesa for ARM
+mesa-va-drivers
+mesa-vdpau-drivers
+
+# =============================================================================
+# VIDEO ACCELERATION
+# =============================================================================
+
+# V4L2 for Raspberry Pi
+v4l-utils
+libv4l-0
+
+# =============================================================================
+# KERNEL MODULES
+# =============================================================================
+
+# Additional firmware
+firmware-brcm80211
+firmware-realtek
+firmware-atheros
+
+# =============================================================================
+# POWER MANAGEMENT
+# =============================================================================
+
+# ARM power tools
+cpufrequtils
+
+# =============================================================================
+# NOTES
+# =============================================================================
+# 
+# For Raspberry Pi builds:
+# 1. Use the official Raspberry Pi OS kernel or compile a custom one
+# 2. Ensure /boot/config.txt is properly configured
+# 3. GPU memory split should be at least 128MB for browser
+#
+# Recommended /boot/config.txt additions:
+#   gpu_mem=256
+#   dtoverlay=vc4-fkms-v3d
+#   max_framebuffers=2

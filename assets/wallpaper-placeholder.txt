@@ -1,0 +1,8 @@
+# Wallpaper Placeholder
+
+Replace this file with your actual wallpaper image (wallpaper.png).
+
+Recommended specifications:
+- Size: 1920x1080 pixels (Full HD) or match your target display
+- Format: PNG or JPG
+- Style: Dark colors recommended for digital signage

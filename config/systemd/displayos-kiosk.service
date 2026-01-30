@@ -1,0 +1,56 @@
+# DisplayOS Kiosk Service
+# =======================
+# Location: /etc/systemd/system/displayos-kiosk.service
+#
+# This service manages the browser in kiosk mode
+# Enable with: sudo systemctl enable displayos-kiosk
+# Start with: sudo systemctl start displayos-kiosk
+
+[Unit]
+Description=DisplayOS Browser Kiosk Service
+Documentation=https://github.com/yourusername/displayos
+After=network-online.target graphical.target
+Wants=network-online.target
+Requires=displayos-watchdog.service
+PartOf=graphical.target
+
+[Service]
+Type=simple
+User=displayos
+Group=displayos
+
+# Environment setup
+Environment=DISPLAY=:0
+Environment=XAUTHORITY=/home/displayos/.Xauthority
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
+
+# Read configuration
+EnvironmentFile=/etc/displayos/config.conf
+
+# Pre-start: ensure X is ready and load config
+ExecStartPre=/bin/bash -c 'until xdpyinfo >/dev/null 2>&1; do sleep 1; done'
+ExecStartPre=/usr/local/bin/displayos-load-config
+
+# Main browser execution
+ExecStart=/usr/local/bin/displayos-start-browser
+
+# Restart configuration
+Restart=always
+RestartSec=5
+TimeoutStartSec=30
+TimeoutStopSec=10
+
+# Resource limits
+MemoryMax=2G
+CPUQuota=80%
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+ReadWritePaths=/home/displayos/.cache /home/displayos/.config /var/log/displayos
+
+[Install]
+WantedBy=graphical.target
