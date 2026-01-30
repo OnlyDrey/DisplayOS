@@ -2,6 +2,8 @@
 
 A lightweight, Debian-based Linux distribution designed for digital signage and kiosk deployments. DisplayOS boots directly into a browser in kiosk mode, displaying a user-defined URL.
 
+<img src="assets/branding/DisplayOS.png" alt="DisplayOS" width="200"/>
+
 ![DisplayOS](assets/branding/DisplayOS.png)
 
 ## Features
