@@ -29,8 +29,8 @@ A lightweight, Debian-based Linux distribution designed for digital signage and 
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/displayos.git
-cd displayos
+git clone https://github.com/OnlyDrey/DisplayOS.git
+cd DisplayOS
 
 # Make the build script executable
 chmod +x scripts/build_iso.sh
@@ -94,7 +94,7 @@ WATCHDOG_TIMEOUT=30
 ## Project Structure
 
 ```
-displayos/
+DisplayOS/
 ├── README.md                 # This file
 ├── LICENSE                   # Project license
 ├── docs/                     # Documentation
