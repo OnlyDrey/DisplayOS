@@ -375,39 +375,57 @@ done < <(grep -v '^#' /tmp/packages.list | grep -v '^$')
 
 echo "[$(date '+%H:%M:%S')] Packages to install: $(echo ${PACKAGES_ARRAY[@]} | tr ' ' '\n' | grep -c .)" >&2
 
-# Install kernel package FIRST and explicitly
-echo "[$(date '+%H:%M:%S')] Installing kernel package (linux-image-amd64)..." >&2
-if apt-get install -y linux-image-amd64 2>&1 | tee -a /tmp/apt-install.log; then
-    echo "[$(date '+%H:%M:%S')] ✓ Kernel package installed" >&2
-else
-    echo "[$(date '+%H:%M:%S')] ERROR: Kernel package installation failed!" >&2
-    echo "[$(date '+%H:%M:%S')] Trying alternative: linux-image-686-pae..." >&2
-    apt-get install -y linux-image-686-pae 2>&1 | tee -a /tmp/apt-install.log || \
-    apt-get install -y linux-image-generic 2>&1 | tee -a /tmp/apt-install.log || true
-fi
+# Install ESSENTIAL packages FIRST (before bulk install which may fail)
+echo "[$(date '+%H:%M:%S')] Installing essential packages (kernel, boot, systemd)..." >&2
+apt-get install -y --no-install-recommends --no-install-suggests \
+    linux-image-amd64 \
+    initramfs-tools \
+    systemd \
+    systemd-sysv \
+    grub-pc \
+    grub-efi-amd64 \
+    2>&1 | tee -a /tmp/apt-install.log || {
+    echo "[$(date '+%H:%M:%S')] ERROR: Essential packages failed!" >&2
+    echo "[$(date '+%H:%M:%S')] Trying alternative kernel packages..." >&2
+    apt-get install -y linux-image-generic linux-headers-generic 2>&1 | tee -a /tmp/apt-install.log || true
+}
 
-# Now install all other packages at once (excluding kernel packages already handled)
-echo "[$(date '+%H:%M:%S')] Installing remaining $PACKAGE_COUNT packages (this may take 10-15 minutes)..." >&2
-# Filter out kernel packages as they were handled separately
+# Verify kernel installation - this is CRITICAL
+if [[ ! -f /boot/vmlinuz-* ]]; then
+    echo "[$(date '+%H:%M:%S')] FATAL: Kernel installation failed" >&2
+    dpkg -l | grep linux-image | tee -a /tmp/apt-install.log
+    exit 1
+fi
+echo "[$(date '+%H:%M:%S')] ✓ Essential packages installed (kernel present)" >&2
+
+# Now install all other packages at once (excluding essential packages already handled)
+echo "[$(date '+%H:%M:%S')] Installing remaining optional packages (this may take 10-15 minutes)..." >&2
+# Filter out packages already installed
 declare -a FILTERED_PACKAGES
 for pkg in "${PACKAGES_ARRAY[@]}"; do
-    if [[ ! "$pkg" =~ linux-image|linux-headers ]]; then
+    # Skip essential packages already installed
+    if [[ ! "$pkg" =~ ^(linux-image|linux-headers|initramfs-tools|systemd|grub|efibootmgr)$ ]]; then
         FILTERED_PACKAGES+=("$pkg")
     fi
 done
+echo "[$(date '+%H:%M:%S')] Optional packages to install: ${#FILTERED_PACKAGES[@]}" >&2
 
-# First attempt: normal installation
-if ! apt-get install -y -qq --no-install-recommends --no-install-suggests "${FILTERED_PACKAGES[@]}" 2>&1 | tee -a /tmp/apt-install.log; then
-    echo "[$(date '+%H:%M:%S')] Warning: Package installation failed with broken dependencies" >&2
-    echo "[$(date '+%H:%M:%S')] Attempting to fix broken dependencies (apt-get install -f)..." >&2
-    if ! apt-get install -f -y -qq 2>&1 | tee -a /tmp/apt-install.log; then
-        echo "[$(date '+%H:%M:%S')] Attempting more aggressive fix (apt-get dist-upgrade)..." >&2
-        apt-get dist-upgrade -y -qq 2>&1 | tee -a /tmp/apt-install.log || true
+# First attempt: normal installation of optional packages
+if [[ ${#FILTERED_PACKAGES[@]} -gt 0 ]]; then
+    if ! apt-get install -y -qq --no-install-recommends --no-install-suggests "${FILTERED_PACKAGES[@]}" 2>&1 | tee -a /tmp/apt-install.log; then
+        echo "[$(date '+%H:%M:%S')] Warning: Some optional packages failed with broken dependencies" >&2
+        echo "[$(date '+%H:%M:%S')] Attempting to fix broken dependencies (apt-get install -f)..." >&2
+        if ! apt-get install -f -y -qq 2>&1 | tee -a /tmp/apt-install.log; then
+            echo "[$(date '+%H:%M:%S')] Note: Could not auto-fix all dependencies" >&2
+        fi
+
+        # Retry the original failed packages but don't fail if they don't install
+        echo "[$(date '+%H:%M:%S')] Retrying optional packages..." >&2
+        apt-get install -y -qq --no-install-recommends --no-install-suggests "${FILTERED_PACKAGES[@]}" 2>&1 | tee -a /tmp/apt-install.log || true
+        echo "[$(date '+%H:%M:%S')] Note: Continuing with essential packages only if needed" >&2
     fi
-
-    # Retry the original failed packages
-    echo "[$(date '+%H:%M:%S')] Retrying failed packages..." >&2
-    apt-get install -y -qq --no-install-recommends --no-install-suggests "${FILTERED_PACKAGES[@]}" 2>&1 | tee -a /tmp/apt-install.log || true
+else
+    echo "[$(date '+%H:%M:%S')] No optional packages to install" >&2
 fi
 
 # Generate locales AFTER packages are installed
