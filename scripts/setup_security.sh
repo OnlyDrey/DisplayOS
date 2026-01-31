@@ -230,61 +230,80 @@ configure_apparmor() {
 
 configure_firewall() {
     log STEP "Configuring UFW firewall"
-    
+
     if [[ "$SKIP_FIREWALL" == "true" ]]; then
         log INFO "Skipping firewall configuration"
         return
     fi
-    
+
+    # Check if we're in a chroot environment (ufw won't work properly there)
+    if is_chroot; then
+        log WARN "Running in chroot environment, skipping UFW configuration (will be configured on boot)"
+        return
+    fi
+
     if ! command -v ufw &>/dev/null; then
-        apt-get update -qq
-        apt-get install -y ufw
+        apt-get update -qq 2>/dev/null || true
+        apt-get install -y ufw 2>/dev/null || true
     fi
-    
-    ufw --force reset
-    ufw default deny incoming
-    ufw default deny outgoing
-    
-    # Allow outbound HTTP/HTTPS (for browser)
-    ufw allow out 80/tcp comment 'Allow HTTP'
-    ufw allow out 443/tcp comment 'Allow HTTPS'
-    ufw allow out 53/udp comment 'Allow DNS'
-    ufw allow out 53/tcp comment 'Allow DNS TCP'
-    ufw allow out 123/udp comment 'Allow NTP'
-    ufw allow out 67/udp comment 'Allow DHCP'
-    ufw allow out 68/udp comment 'Allow DHCP'
-    
-    if [[ "$ENABLE_SSH" == "true" ]]; then
-        ufw allow in 22/tcp comment 'Allow SSH'
-        log INFO "SSH inbound traffic allowed"
+
+    # Only configure ufw if it's available
+    if command -v ufw &>/dev/null; then
+        ufw --force reset 2>/dev/null || true
+        ufw default deny incoming 2>/dev/null || true
+        ufw default deny outgoing 2>/dev/null || true
+
+        # Allow outbound HTTP/HTTPS (for browser)
+        ufw allow out 80/tcp comment 'Allow HTTP' 2>/dev/null || true
+        ufw allow out 443/tcp comment 'Allow HTTPS' 2>/dev/null || true
+        ufw allow out 53/udp comment 'Allow DNS' 2>/dev/null || true
+        ufw allow out 53/tcp comment 'Allow DNS TCP' 2>/dev/null || true
+        ufw allow out 123/udp comment 'Allow NTP' 2>/dev/null || true
+        ufw allow out 67/udp comment 'Allow DHCP' 2>/dev/null || true
+        ufw allow out 68/udp comment 'Allow DHCP' 2>/dev/null || true
+
+        if [[ "$ENABLE_SSH" == "true" ]]; then
+            ufw allow in 22/tcp comment 'Allow SSH' 2>/dev/null || true
+            log INFO "SSH inbound traffic allowed"
+        fi
+
+        ufw allow in on lo 2>/dev/null || true
+        ufw allow out on lo 2>/dev/null || true
+        ufw --force enable 2>/dev/null || true
+
+        log INFO "UFW firewall configured (HTTP/HTTPS outbound only)"
+    else
+        log WARN "UFW not available, skipping firewall configuration"
     fi
-    
-    ufw allow in on lo
-    ufw allow out on lo
-    ufw --force enable
-    
-    log INFO "UFW firewall configured (HTTP/HTTPS outbound only)"
 }
 
 disable_unnecessary_services() {
     log STEP "Disabling unnecessary services"
-    
-    local services_to_disable=(
-        "bluetooth.service"
-        "cups.service"
-        "cups-browsed.service"
-        "avahi-daemon.service"
-        "ModemManager.service"
-    )
-    
-    for service in "${services_to_disable[@]}"; do
-        if systemctl list-unit-files | grep -q "^${service}"; then
-            safe_systemctl disable "$service" || true
-            safe_systemctl stop "$service" || true
-            log INFO "Disabled: $service"
-        fi
-    done
-    
+
+    # Check if systemctl is available (it won't be in chroot)
+    if ! command -v systemctl &>/dev/null; then
+        log WARN "systemctl not available (running in chroot?), skipping service disable"
+    else
+        local services_to_disable=(
+            "bluetooth.service"
+            "cups.service"
+            "cups-browsed.service"
+            "avahi-daemon.service"
+            "ModemManager.service"
+        )
+
+        for service in "${services_to_disable[@]}"; do
+            if systemctl list-unit-files | grep -q "^${service}"; then
+                safe_systemctl disable "$service" || true
+                safe_systemctl stop "$service" || true
+                log INFO "Disabled: $service"
+            fi
+        done
+    fi
+
+    # Create modprobe.d directory if it doesn't exist
+    mkdir -p /etc/modprobe.d
+
     cat > /etc/modprobe.d/displayos-blacklist.conf << 'EOF'
 # DisplayOS - Blacklisted kernel modules
 blacklist bluetooth
