@@ -305,11 +305,6 @@ deb $DEBIAN_MIRROR $DEBIAN_VERSION-updates main contrib non-free non-free-firmwa
 deb http://security.debian.org/debian-security $DEBIAN_VERSION-security main contrib non-free non-free-firmware
 EOF
 
-    # Setup locale configuration to suppress warnings
-    echo "en_US.UTF-8 UTF-8" > "$BUILD_WORK/chroot/etc/locale.gen"
-    chroot "$BUILD_WORK/chroot" locale-gen >> "$LOG_FILE" 2>&1 || true
-    chroot "$BUILD_WORK/chroot" update-locale LANG=C.UTF-8 >> "$LOG_FILE" 2>&1 || true
-
     log INFO "Chroot configuration complete"
 }
 
@@ -341,21 +336,32 @@ export DEBIAN_FRONTEND=noninteractive
 export LC_ALL=C.UTF-8
 export LANG=C.UTF-8
 
-# Generate locales to suppress perl warnings
-locale-gen en_US.UTF-8 2>/dev/null || true
-update-locale LANG=C.UTF-8 2>/dev/null || true
-
 # Single apt-get update (most efficient)
 echo "[$(date '+%H:%M:%S')] Updating package lists..." >&2
-apt-get update -qq 2>&1 | grep -E "(^Get:|^Err:|error|E:)" | tee /tmp/apt-update.log || true
+apt-get update 2>&1 | grep -E "(^Get:|^Err:|error|E:)" | tee /tmp/apt-update.log || true
 
-# Get package list (split into multiple chunks to reduce memory usage)
-PACKAGES=$(grep -v '^#' /tmp/packages.list | grep -v '^$' | tr '\n' ' ')
+# Get package list - ensure proper whitespace handling
 PACKAGE_COUNT=$(grep -v '^#' /tmp/packages.list | grep -v '^$' | wc -l)
+echo "[$(date '+%H:%M:%S')] Found $PACKAGE_COUNT packages to install..." >&2
 
-# Install ALL packages at once (single apt-get call - much faster and less network overhead)
+# Read all packages into array (safer than passing as string)
+declare -a PACKAGES_ARRAY
+while IFS= read -r pkg; do
+    [[ -n "$pkg" ]] && PACKAGES_ARRAY+=("$pkg")
+done < <(grep -v '^#' /tmp/packages.list | grep -v '^$')
+
+# Install all packages at once (single apt-get call - much faster)
 echo "[$(date '+%H:%M:%S')] Installing $PACKAGE_COUNT packages (this may take 10-15 minutes)..." >&2
-apt-get install -y -qq --no-install-recommends --no-install-suggests $PACKAGES 2>&1 | grep -E "(^Get:|^Unpacking|^Setting up|^Preparing|error|E:|warning|W:)" | tee /tmp/apt-install.log || true
+if ! apt-get install -y -qq --no-install-recommends --no-install-suggests "${PACKAGES_ARRAY[@]}" 2>&1 | tee /tmp/apt-install.log; then
+    echo "[$(date '+%H:%M:%S')] Warning: Some packages may have failed to install, attempting to fix broken dependencies..." >&2
+    apt-get install -f -y -qq 2>&1 | tee -a /tmp/apt-install.log || true
+fi
+
+# Generate locales AFTER packages are installed
+echo "[$(date '+%H:%M:%S')] Generating locales..." >&2
+echo "en_US.UTF-8 UTF-8" > /etc/locale.gen
+locale-gen 2>&1 | tee -a /tmp/apt-install.log || true
+update-locale LANG=C.UTF-8 2>&1 | tee -a /tmp/apt-install.log || true
 
 # Generate initramfs for all installed kernels
 echo "[$(date '+%H:%M:%S')] Generating initramfs..." >&2
@@ -389,9 +395,11 @@ configure_system() {
 
     local chroot="$BUILD_WORK/chroot"
 
-    # Create displayos user (redirect to log)
-    chroot "$chroot" useradd -m -s /bin/bash -G sudo,audio,video,netdev displayos >> "$LOG_FILE" 2>&1 || true
-    echo "displayos:displayos" | chroot "$chroot" chpasswd >> "$LOG_FILE" 2>&1
+    # Create displayos user (only add groups that exist)
+    chroot "$chroot" useradd -m -s /bin/bash -G sudo,audio,video displayos >> "$LOG_FILE" 2>&1 || true
+
+    # Set password directly using usermod instead of chpasswd (PAM-independent)
+    echo "displayos:displayos" | chroot "$chroot" chpasswd -c SHA512 >> "$LOG_FILE" 2>&1 || true
     
     # Create DisplayOS directories
     mkdir -p "$chroot/etc/displayos"
