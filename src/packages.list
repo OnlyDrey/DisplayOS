@@ -17,6 +17,10 @@ systemd-sysv
 dbus
 udev
 
+# Kernel and boot
+linux-image-amd64
+linux-headers-amd64
+
 # Init and boot
 grub-pc
 grub-efi-amd64
