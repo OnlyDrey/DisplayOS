@@ -15,6 +15,7 @@
 #   --debug           Enable debug mode (verbose output)
 #   --no-luks         Disable LUKS encryption in installer
 #   --skip-security   Skip security hardening (for testing/development)
+#   --enable-ssh      Enable SSH on built ISO (disabled by default for security)
 #   --help            Show this help message
 #
 # Requirements:
@@ -45,6 +46,7 @@ BUILD_CLEAN=false
 BUILD_DEBUG=false
 ENABLE_LUKS=true
 SKIP_SECURITY=false
+ENABLE_SSH_ISO=false
 APT_NO_RECOMMENDS=true
 
 # Debian configuration
@@ -157,12 +159,14 @@ ${BOLD}Options:${NC}
     --debug           Enable debug mode (verbose output)
     --no-luks         Disable LUKS encryption in installer
     --skip-security   Skip security hardening (for testing/development)
+    --enable-ssh      Enable SSH on built ISO (disabled by default for security)
     --help            Show this help message
 
 ${BOLD}Examples:${NC}
-    sudo $0                          # Build amd64 ISO with security hardening
+    sudo $0                          # Build amd64 ISO with security hardening (SSH disabled)
     sudo $0 --arch=arm64             # Build ARM64 ISO
     sudo $0 --clean --debug          # Clean build with debug output
+    sudo $0 --enable-ssh             # Build with SSH enabled
     sudo $0 --skip-security          # Build without security hardening
 
 ${BOLD}Requirements:${NC}
@@ -762,8 +766,15 @@ configure_security() {
     # Copy and run security setup script
     cp "$PROJECT_ROOT/scripts/setup_security.sh" "$chroot/tmp/"
     chmod +x "$chroot/tmp/setup_security.sh"
+
+    # Build security setup command with options
+    local security_cmd="/tmp/setup_security.sh"
+    if [[ "$ENABLE_SSH_ISO" == true ]]; then
+        security_cmd="$security_cmd --enable-ssh"
+    fi
+
     # Redirect all security setup output to log file
-    chroot "$chroot" /tmp/setup_security.sh >> "$LOG_FILE" 2>&1
+    chroot "$chroot" $security_cmd >> "$LOG_FILE" 2>&1
 
     log INFO "Security hardening complete"
 }
@@ -989,6 +1000,9 @@ main() {
             --skip-security)
                 SKIP_SECURITY=true
                 ;;
+            --enable-ssh)
+                ENABLE_SSH_ISO=true
+                ;;
             --help)
                 show_help
                 exit 0
@@ -1023,6 +1037,11 @@ main() {
         echo -e "Security: ${YELLOW}DISABLED (--skip-security)${NC}"
     else
         echo -e "Security: ${GREEN}Enabled${NC}"
+    fi
+    if [[ "$ENABLE_SSH_ISO" == true ]]; then
+        echo -e "SSH on ISO: ${GREEN}ENABLED (--enable-ssh)${NC}"
+    else
+        echo -e "SSH on ISO: ${YELLOW}DISABLED (for security)${NC}"
     fi
     echo -e ""
     
