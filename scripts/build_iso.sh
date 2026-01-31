@@ -344,6 +344,16 @@ export LANG=C.UTF-8
 echo "[$(date '+%H:%M:%S')] Updating package lists..." >&2
 apt-get update 2>&1 | grep -E "(^Get:|^Err:|error|E:)" | tee /tmp/apt-update.log || true
 
+# Check if linux-image-amd64 is available
+echo "[$(date '+%H:%M:%S')] Checking kernel package availability..." >&2
+if apt-cache search linux-image-amd64 | grep -q "^linux-image-amd64"; then
+    echo "[$(date '+%H:%M:%S')] ✓ linux-image-amd64 package found" >&2
+else
+    echo "[$(date '+%H:%M:%S')] WARNING: linux-image-amd64 not found in repositories" >&2
+    echo "[$(date '+%H:%M:%S')] Available linux-image packages:" >&2
+    apt-cache search "^linux-image-" | head -10 >&2
+fi
+
 # Get package list - ensure proper whitespace handling
 PACKAGE_COUNT=$(grep -v '^#' /tmp/packages.list | grep -v '^$' | wc -l)
 echo "[$(date '+%H:%M:%S')] Found $PACKAGE_COUNT packages to install..." >&2
@@ -359,6 +369,14 @@ echo "[$(date '+%H:%M:%S')] Installing $PACKAGE_COUNT packages (this may take 10
 if ! apt-get install -y -qq --no-install-recommends --no-install-suggests "${PACKAGES_ARRAY[@]}" 2>&1 | tee /tmp/apt-install.log; then
     echo "[$(date '+%H:%M:%S')] Warning: Some packages may have failed to install, attempting to fix broken dependencies..." >&2
     apt-get install -f -y -qq 2>&1 | tee -a /tmp/apt-install.log || true
+
+    # Additional diagnostics for kernel package
+    echo "[$(date '+%H:%M:%S')] Checking kernel package installation status..." >&2
+    if ! dpkg -l | grep -q "^ii.*linux-image-amd64"; then
+        echo "[$(date '+%H:%M:%S')] ERROR: linux-image-amd64 failed to install" >&2
+        echo "[$(date '+%H:%M:%S')] Attempting to install kernel package with full output..." >&2
+        apt-get install -y linux-image-amd64 2>&1 | tee -a /tmp/apt-install.log || true
+    fi
 fi
 
 # Generate locales AFTER packages are installed
@@ -367,9 +385,22 @@ echo "en_US.UTF-8 UTF-8" > /etc/locale.gen
 locale-gen 2>&1 | tee -a /tmp/apt-install.log || true
 update-locale LANG=C.UTF-8 2>&1 | tee -a /tmp/apt-install.log || true
 
+# Verify kernel was installed
+if [[ -f /boot/vmlinuz-* ]]; then
+    echo "[$(date '+%H:%M:%S')] Found kernel: $(ls -1 /boot/vmlinuz-* 2>/dev/null || echo 'none')" >&2
+else
+    echo "[$(date '+%H:%M:%S')] WARNING: No kernel found in /boot, kernel package may have failed to install" >&2
+    echo "[$(date '+%H:%M:%S')] Checking linux-image-amd64 package status..." >&2
+    dpkg -l | grep linux-image-amd64 || echo "linux-image-amd64 not installed" >&2
+fi
+
 # Generate initramfs for all installed kernels
 echo "[$(date '+%H:%M:%S')] Generating initramfs..." >&2
 update-initramfs -c -k all 2>&1 | tee -a /tmp/apt-install.log || true
+
+# List what's in /boot after everything
+echo "[$(date '+%H:%M:%S')] Boot directory contents:" >&2
+ls -lh /boot/ 2>&1 | tee -a /tmp/apt-install.log || true
 
 # Clean up package cache
 echo "[$(date '+%H:%M:%S')] Cleaning up..." >&2
@@ -806,6 +837,10 @@ create_live_image() {
         cp "$chroot/boot/vmlinuz-"* "$image/live/vmlinuz" >> "$LOG_FILE" 2>&1 || log ERROR "Failed to copy kernel"
     else
         log ERROR "No kernel found in chroot /boot directory"
+        log ERROR "Available files in /boot:"
+        ls -la "$chroot/boot/" >> "$LOG_FILE" 2>&1 || true
+        log ERROR "Checking if linux-image-amd64 was installed:"
+        chroot "$chroot" dpkg -l | grep linux-image >> "$LOG_FILE" 2>&1 || true
         return 1
     fi
 
@@ -814,6 +849,8 @@ create_live_image() {
         cp "$chroot/boot/initrd.img-"* "$image/live/initrd" >> "$LOG_FILE" 2>&1 || log ERROR "Failed to copy initramfs"
     else
         log ERROR "No initramfs found in chroot /boot directory"
+        log ERROR "Available files in /boot:"
+        ls -la "$chroot/boot/" >> "$LOG_FILE" 2>&1 || true
         return 1
     fi
 
