@@ -488,16 +488,29 @@ SCRIPT
     chmod +x "$BUILD_WORK/chroot/tmp/install_packages.sh"
     # Run installation and capture exit code to a temp file (outside chroot)
     local install_output="$BUILD_WORK/install_output.txt"
-    chroot "$BUILD_WORK/chroot" /tmp/install_packages.sh > "$install_output" 2>&1
+
+    log STEP "Running package installation (this may take 15-30 minutes)..."
+    echo "Starting package installation at $(date)" > "$install_output"
+
+    # Run with 45 minute timeout (packages can take a long time)
+    timeout 2700 chroot "$BUILD_WORK/chroot" /tmp/install_packages.sh >> "$install_output" 2>&1
     local install_exit_code=$?
 
+    # Check if it timed out
+    if [[ $install_exit_code -eq 124 ]]; then
+        log ERROR "Package installation timed out after 45 minutes!"
+        log ERROR "Build may have hung during package download or installation"
+        return 1
+    fi
+
     # Display output with filtering
+    log INFO "Processing installation output..."
     while IFS= read -r line; do
         # Log everything to file
         echo "$line" >> "$LOG_FILE"
 
         # Show progress messages in terminal
-        if [[ "$line" =~ \[.*\]\ (Updating|Installing|Generating|Cleaning|Package\ installation|complete|ERROR|FATAL|Kernel) ]]; then
+        if [[ "$line" =~ \[.*\]\ (Starting|Updating|Checking|Installing|Generating|Cleaning|Package\ installation|Optional|complete|ERROR|FATAL|Kernel) ]]; then
             echo -e "${GREEN}[INST]${NC} $line"
         fi
     done < "$install_output"
