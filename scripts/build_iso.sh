@@ -15,7 +15,7 @@
 #   --debug           Enable debug mode (verbose output)
 #   --no-luks         Disable LUKS encryption in installer
 #   --skip-security   Skip security hardening (for testing/development)
-#   --enable-ssh      Enable SSH on built ISO (disabled by default for security)
+#   --disable-ssh     Disable SSH on built ISO (enabled by default)
 #   --help            Show this help message
 #
 # Requirements:
@@ -46,7 +46,7 @@ BUILD_CLEAN=false
 BUILD_DEBUG=false
 ENABLE_LUKS=true
 SKIP_SECURITY=false
-ENABLE_SSH_ISO=false
+ENABLE_SSH_ISO=true
 APT_NO_RECOMMENDS=true
 
 # Debian configuration
@@ -159,14 +159,14 @@ ${BOLD}Options:${NC}
     --debug           Enable debug mode (verbose output)
     --no-luks         Disable LUKS encryption in installer
     --skip-security   Skip security hardening (for testing/development)
-    --enable-ssh      Enable SSH on built ISO (disabled by default for security)
+    --disable-ssh     Disable SSH on built ISO (enabled by default)
     --help            Show this help message
 
 ${BOLD}Examples:${NC}
-    sudo $0                          # Build amd64 ISO with security hardening (SSH disabled)
+    sudo $0                          # Build amd64 ISO with security hardening (SSH enabled)
     sudo $0 --arch=arm64             # Build ARM64 ISO
     sudo $0 --clean --debug          # Clean build with debug output
-    sudo $0 --enable-ssh             # Build with SSH enabled
+    sudo $0 --disable-ssh            # Build with SSH disabled
     sudo $0 --skip-security          # Build without security hardening
 
 ${BOLD}Requirements:${NC}
@@ -1000,8 +1000,8 @@ main() {
             --skip-security)
                 SKIP_SECURITY=true
                 ;;
-            --enable-ssh)
-                ENABLE_SSH_ISO=true
+            --disable-ssh)
+                ENABLE_SSH_ISO=false
                 ;;
             --help)
                 show_help
@@ -1039,9 +1039,9 @@ main() {
         echo -e "Security: ${GREEN}Enabled${NC}"
     fi
     if [[ "$ENABLE_SSH_ISO" == true ]]; then
-        echo -e "SSH on ISO: ${GREEN}ENABLED (--enable-ssh)${NC}"
+        echo -e "SSH on ISO: ${GREEN}ENABLED (default)${NC}"
     else
-        echo -e "SSH on ISO: ${YELLOW}DISABLED (for security)${NC}"
+        echo -e "SSH on ISO: ${YELLOW}DISABLED (--disable-ssh)${NC}"
     fi
     echo -e ""
     
