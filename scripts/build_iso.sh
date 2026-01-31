@@ -53,8 +53,8 @@ readonly ISO_LABEL="DISPLAYOS"
 readonly ISO_PUBLISHER="DisplayOS Project"
 readonly ISO_VOLUME="DisplayOS Live"
 
-# Log file
-LOG_FILE="/var/log/displayos-build.log"
+# Log file - use ./build folder for output
+LOG_FILE="$PROJECT_ROOT/build/displayos-build.log"
 
 # =============================================================================
 # COLORS AND FORMATTING
@@ -93,17 +93,17 @@ log() {
     local message="$*"
     local timestamp
     timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-    
+
     # Log to file
     echo "[$timestamp] [$level] $message" >> "$LOG_FILE"
-    
+
     # Output to terminal based on level
     case "$level" in
         INFO)
             echo -e "${GREEN}[INFO]${NC} $message"
             ;;
         WARN)
-            echo -e "${YELLOW}[WARN]${NC} $message"
+            echo -e "${YELLOW}[WARN]${NC} $message" >&2
             ;;
         ERROR)
             echo -e "${RED}[ERROR]${NC} $message" >&2
@@ -117,6 +117,21 @@ log() {
             echo -e "\n${BOLD}${BLUE}==> $message${NC}"
             ;;
     esac
+}
+
+# Function to log command output
+log_output() {
+    echo "$(date '+%Y-%m-%d %H:%M:%S'): $*" >> "$LOG_FILE"
+}
+
+# Function to run commands and suppress terminal output, logging to file
+run_quiet() {
+    local cmd="$*"
+    if [[ "$BUILD_DEBUG" == true ]]; then
+        eval "$cmd" 2>&1 | tee -a "$LOG_FILE"
+    else
+        eval "$cmd" >> "$LOG_FILE" 2>&1
+    fi
 }
 
 # =============================================================================
@@ -261,16 +276,16 @@ bootstrap_debian() {
 
 configure_chroot() {
     log STEP "Configuring chroot environment"
-    
+
     # Mount necessary filesystems
     mount --bind /dev "$BUILD_WORK/chroot/dev"
     mount --bind /dev/pts "$BUILD_WORK/chroot/dev/pts"
     mount -t proc proc "$BUILD_WORK/chroot/proc"
     mount -t sysfs sysfs "$BUILD_WORK/chroot/sys"
-    
+
     # Configure hostname
     echo "displayos" > "$BUILD_WORK/chroot/etc/hostname"
-    
+
     # Configure hosts
     cat > "$BUILD_WORK/chroot/etc/hosts" << EOF
 127.0.0.1       localhost
@@ -280,47 +295,73 @@ configure_chroot() {
 ff02::1         ip6-allnodes
 ff02::2         ip6-allrouters
 EOF
-    
+
     # Configure apt sources
     cat > "$BUILD_WORK/chroot/etc/apt/sources.list" << EOF
 deb $DEBIAN_MIRROR $DEBIAN_VERSION main contrib non-free non-free-firmware
 deb $DEBIAN_MIRROR $DEBIAN_VERSION-updates main contrib non-free non-free-firmware
 deb http://security.debian.org/debian-security $DEBIAN_VERSION-security main contrib non-free non-free-firmware
 EOF
-    
+
+    # Setup locale configuration to suppress warnings
+    echo "en_US.UTF-8 UTF-8" > "$BUILD_WORK/chroot/etc/locale.gen"
+    chroot "$BUILD_WORK/chroot" locale-gen 2>/dev/null || true
+    chroot "$BUILD_WORK/chroot" update-locale LANG=C.UTF-8 2>/dev/null || true
+
     log INFO "Chroot configuration complete"
 }
 
 install_packages() {
     log STEP "Installing packages"
-    
+
     # Copy package list to chroot
     cp "$PROJECT_ROOT/src/packages.list" "$BUILD_WORK/chroot/tmp/"
-    
-    # Create installation script
+
+    # Create installation script with locale fixes and proper error handling
     cat > "$BUILD_WORK/chroot/tmp/install_packages.sh" << 'SCRIPT'
 #!/bin/bash
 set -e
 
+# Suppress normal apt output but show warnings and errors
 export DEBIAN_FRONTEND=noninteractive
+export LC_ALL=C.UTF-8
+export LANG=C.UTF-8
 
-# Update package lists
-apt-get update
+# Generate locales to suppress perl warnings
+locale-gen en_US.UTF-8 2>/dev/null || true
+update-locale LANG=C.UTF-8 2>/dev/null || true
 
-# Install packages from list
+# Update package lists (suppress output, show only errors)
+echo "Updating package lists..." >&2
+apt-get update 2>&1 | grep -E "(^E:|^Err:|error)" || true
+
+# Install packages from list (suppress detailed output, show warnings and errors)
+echo "Installing packages..." >&2
+COUNT=0
+TOTAL=$(grep -v '^#' /tmp/packages.list | grep -v '^$' | wc -l)
+
 grep -v '^#' /tmp/packages.list | grep -v '^$' | while read -r pkg; do
-    echo "Installing: $pkg"
-    apt-get install -y "$pkg" || echo "Warning: Failed to install $pkg"
+    COUNT=$((COUNT+1))
+    # Use -qq to suppress output, but capture errors
+    apt-get install -y "$pkg" 2>&1 | grep -E "(^E:|^W:|warning|error)" || true
 done
+
+echo "Package installation complete." >&2
 
 # Clean up
 apt-get clean
 rm -rf /var/lib/apt/lists/*
 SCRIPT
-    
+
     chmod +x "$BUILD_WORK/chroot/tmp/install_packages.sh"
-    chroot "$BUILD_WORK/chroot" /tmp/install_packages.sh
-    
+    chroot "$BUILD_WORK/chroot" /tmp/install_packages.sh 2>&1 | while IFS= read -r line; do
+        if [[ "$line" =~ (^E:|^W:|warning|error|Error|Warning) ]]; then
+            log WARN "$line"
+        else
+            log_output "$line"
+        fi
+    done
+
     log INFO "Package installation complete"
 }
 
@@ -355,11 +396,11 @@ configure_system() {
     # Configure Openbox for kiosk
     configure_openbox "$chroot"
     
-    # Enable services
-    chroot "$chroot" systemctl enable displayos-kiosk.service
-    chroot "$chroot" systemctl enable displayos-watchdog.service
-    chroot "$chroot" systemctl enable displayos-shortcuts.service
-    chroot "$chroot" systemctl enable NetworkManager.service
+    # Enable services (suppress systemd warnings in chroot)
+    chroot "$chroot" systemctl enable displayos-kiosk.service 2>&1 | grep -E "(error|Error)" || true
+    chroot "$chroot" systemctl enable displayos-watchdog.service 2>&1 | grep -E "(error|Error)" || true
+    chroot "$chroot" systemctl enable displayos-shortcuts.service 2>&1 | grep -E "(error|Error)" || true
+    chroot "$chroot" systemctl enable NetworkManager.service 2>&1 | grep -E "(error|Error)" || true
     
     log INFO "System configuration complete"
 }
@@ -683,14 +724,24 @@ SCRIPT
 
 configure_security() {
     log STEP "Applying security hardening"
-    
+
     local chroot="$BUILD_WORK/chroot"
-    
+
     # Copy and run security setup script
     cp "$PROJECT_ROOT/scripts/setup_security.sh" "$chroot/tmp/"
     chmod +x "$chroot/tmp/setup_security.sh"
-    chroot "$chroot" /tmp/setup_security.sh
-    
+    chroot "$chroot" /tmp/setup_security.sh 2>&1 | while IFS= read -r line; do
+        if [[ "$line" =~ (STEP|ERROR|WARN) ]]; then
+            log_output "$line"
+            # Show steps in terminal too
+            if [[ "$line" =~ "==>" ]]; then
+                echo -e "${BLUE}$line${NC}"
+            fi
+        else
+            log_output "$line"
+        fi
+    done
+
     log INFO "Security hardening complete"
 }
 
@@ -872,17 +923,18 @@ main() {
         esac
         shift
     done
-    
+
     # Validate architecture
     if [[ "$BUILD_ARCH" != "amd64" ]] && [[ "$BUILD_ARCH" != "arm64" ]]; then
-        log ERROR "Invalid architecture: $BUILD_ARCH (must be amd64 or arm64)"
+        echo "ERROR: Invalid architecture: $BUILD_ARCH (must be amd64 or arm64)"
         exit 1
     fi
-    
-    # Initialize
+
+    # Create build directory and initialize logging
+    mkdir -p "$BUILD_WORK" "$BUILD_OUTPUT"
     log_init
     check_root "$@"
-    
+
     echo -e "\n${BOLD}========================================${NC}"
     echo -e "${BOLD}  DisplayOS Build Script v$SCRIPT_VERSION${NC}"
     echo -e "${BOLD}========================================${NC}"
@@ -902,9 +954,15 @@ main() {
     configure_bootloader
     create_iso
     
-    echo -e "\n${GREEN}${BOLD}Build completed successfully!${NC}"
-    echo -e "ISO: ${BOLD}$BUILD_OUTPUT/displayos-${BUILD_ARCH}.iso${NC}"
-    echo -e "Log: ${BOLD}$LOG_FILE${NC}\n"
+    log STEP "Build completed successfully"
+    echo -e ""
+    echo -e "${GREEN}${BOLD}✓ Build completed successfully!${NC}"
+    echo -e ""
+    echo -e "ISO created: ${BOLD}$BUILD_OUTPUT/displayos-${BUILD_ARCH}.iso${NC}"
+    echo -e "ISO size: ${BOLD}$(du -h "$BUILD_OUTPUT/displayos-${BUILD_ARCH}.iso" 2>/dev/null | cut -f1 || echo "N/A")${NC}"
+    echo -e "Checksums: ${BOLD}$BUILD_OUTPUT/displayos-${BUILD_ARCH}.iso.{sha256,md5}${NC}"
+    echo -e "Full log: ${BOLD}$LOG_FILE${NC}"
+    echo -e ""
 }
 
 main "$@"

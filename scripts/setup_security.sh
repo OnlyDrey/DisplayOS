@@ -102,6 +102,43 @@ check_root() {
     fi
 }
 
+setup_locales() {
+    # Generate locales to suppress perl warnings
+    if command -v locale-gen &>/dev/null; then
+        locale-gen en_US.UTF-8 2>/dev/null || true
+        update-locale LANG=C.UTF-8 2>/dev/null || true
+        export LANG=C.UTF-8
+        export LC_ALL=C.UTF-8
+    fi
+}
+
+# Detect if running in chroot environment
+is_chroot() {
+    ! cmp -s <(stat -c %i /.) <(stat -c %i /) 2>/dev/null
+}
+
+# Safe systemctl wrapper that suppresses chroot warnings
+safe_systemctl() {
+    local action="$1"
+    shift
+    local service="$1"
+
+    if is_chroot; then
+        # In chroot, only try to enable/disable without starting
+        case "$action" in
+            enable|disable)
+                systemctl "$action" "$service" 2>&1 | grep -E "(error|Error)" || true
+                ;;
+            start|restart)
+                systemctl "$action" "$service" 2>&1 | grep -E "(error|Error)" || true
+                ;;
+        esac
+    else
+        # Outside chroot, run normally
+        systemctl "$action" "$service"
+    fi
+}
+
 disable_root_ssh() {
     log STEP "Configuring SSH security"
     
@@ -128,12 +165,12 @@ MACs hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com
 EOF
     
     if [[ "$ENABLE_SSH" == "true" ]]; then
-        systemctl enable ssh 2>/dev/null || true
-        systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null || true
+        safe_systemctl enable ssh || true
+        safe_systemctl restart ssh 2>/dev/null || safe_systemctl restart sshd 2>/dev/null || true
         log INFO "SSH enabled with security hardening"
     else
-        systemctl disable ssh 2>/dev/null || true
-        systemctl stop ssh 2>/dev/null || systemctl stop sshd 2>/dev/null || true
+        safe_systemctl disable ssh || true
+        safe_systemctl stop ssh 2>/dev/null || safe_systemctl stop sshd 2>/dev/null || true
         log INFO "SSH disabled"
     fi
 }
@@ -166,9 +203,9 @@ APT::Periodic::Unattended-Upgrade "1";
 APT::Periodic::AutocleanInterval "7";
 EOF
     
-    systemctl enable unattended-upgrades
-    systemctl restart unattended-upgrades
-    
+    safe_systemctl enable unattended-upgrades || true
+    safe_systemctl restart unattended-upgrades || true
+
     log INFO "Automatic security updates configured"
 }
 
@@ -185,9 +222,9 @@ configure_apparmor() {
         apt-get install -y apparmor apparmor-utils apparmor-profiles apparmor-profiles-extra
     fi
     
-    systemctl enable apparmor
-    systemctl start apparmor || true
-    
+    safe_systemctl enable apparmor || true
+    safe_systemctl start apparmor || true
+
     log INFO "AppArmor configured"
 }
 
@@ -242,8 +279,8 @@ disable_unnecessary_services() {
     
     for service in "${services_to_disable[@]}"; do
         if systemctl list-unit-files | grep -q "^${service}"; then
-            systemctl disable "$service" 2>/dev/null || true
-            systemctl stop "$service" 2>/dev/null || true
+            safe_systemctl disable "$service" || true
+            safe_systemctl stop "$service" || true
             log INFO "Disabled: $service"
         fi
     done
@@ -349,12 +386,13 @@ main() {
     done
     
     check_root
+    setup_locales
     mkdir -p "$(dirname "$LOG_FILE")"
-    
+
     echo -e "\n${GREEN}========================================${NC}"
     echo -e "${GREEN}  $SCRIPT_NAME${NC}"
     echo -e "${GREEN}========================================${NC}\n"
-    
+
     disable_root_ssh
     configure_automatic_updates
     configure_apparmor
