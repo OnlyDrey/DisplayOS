@@ -325,6 +325,11 @@ APT::Install-Recommends "false";
 APT::Install-Suggests "false";
 APT::Get::AutomaticRemove "true";
 APT::Get::Purge "true";
+APT::Get::AllowUnauthenticated "true";
+
+// Fix broken packages and resolve conflicts
+APT::Fix-Missing "true";
+APT::Aptitude::ProblemResolver::SolutionCost "100*canceled-actions,200*removals";
 
 // Faster, less verbose output
 quiet "1";
@@ -391,9 +396,18 @@ for pkg in "${PACKAGES_ARRAY[@]}"; do
     fi
 done
 
+# First attempt: normal installation
 if ! apt-get install -y -qq --no-install-recommends --no-install-suggests "${FILTERED_PACKAGES[@]}" 2>&1 | tee -a /tmp/apt-install.log; then
-    echo "[$(date '+%H:%M:%S')] Warning: Some packages may have failed to install, attempting to fix broken dependencies..." >&2
-    apt-get install -f -y -qq 2>&1 | tee -a /tmp/apt-install.log || true
+    echo "[$(date '+%H:%M:%S')] Warning: Package installation failed with broken dependencies" >&2
+    echo "[$(date '+%H:%M:%S')] Attempting to fix broken dependencies (apt-get install -f)..." >&2
+    if ! apt-get install -f -y -qq 2>&1 | tee -a /tmp/apt-install.log; then
+        echo "[$(date '+%H:%M:%S')] Attempting more aggressive fix (apt-get dist-upgrade)..." >&2
+        apt-get dist-upgrade -y -qq 2>&1 | tee -a /tmp/apt-install.log || true
+    fi
+
+    # Retry the original failed packages
+    echo "[$(date '+%H:%M:%S')] Retrying failed packages..." >&2
+    apt-get install -y -qq --no-install-recommends --no-install-suggests "${FILTERED_PACKAGES[@]}" 2>&1 | tee -a /tmp/apt-install.log || true
 fi
 
 # Generate locales AFTER packages are installed
