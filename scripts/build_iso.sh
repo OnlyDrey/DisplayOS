@@ -325,6 +325,11 @@ APT::Install-Recommends "false";
 APT::Install-Suggests "false";
 APT::Get::AutomaticRemove "true";
 APT::Get::Purge "true";
+APT::Get::AllowUnauthenticated "true";
+
+// Fix broken packages and resolve conflicts
+APT::Fix-Missing "true";
+APT::Aptitude::ProblemResolver::SolutionCost "100*canceled-actions,200*removals";
 
 // Faster, less verbose output
 quiet "1";
@@ -368,19 +373,59 @@ while IFS= read -r pkg; do
     [[ -n "$pkg" ]] && PACKAGES_ARRAY+=("$pkg")
 done < <(grep -v '^#' /tmp/packages.list | grep -v '^$')
 
-# Install all packages at once (single apt-get call - much faster)
-echo "[$(date '+%H:%M:%S')] Installing $PACKAGE_COUNT packages (this may take 10-15 minutes)..." >&2
-if ! apt-get install -y -qq --no-install-recommends --no-install-suggests "${PACKAGES_ARRAY[@]}" 2>&1 | tee /tmp/apt-install.log; then
-    echo "[$(date '+%H:%M:%S')] Warning: Some packages may have failed to install, attempting to fix broken dependencies..." >&2
-    apt-get install -f -y -qq 2>&1 | tee -a /tmp/apt-install.log || true
+echo "[$(date '+%H:%M:%S')] Packages to install: $(echo ${PACKAGES_ARRAY[@]} | tr ' ' '\n' | grep -c .)" >&2
 
-    # Additional diagnostics for kernel package
-    echo "[$(date '+%H:%M:%S')] Checking kernel package installation status..." >&2
-    if ! dpkg -l | grep -q "^ii.*linux-image-amd64"; then
-        echo "[$(date '+%H:%M:%S')] ERROR: linux-image-amd64 failed to install" >&2
-        echo "[$(date '+%H:%M:%S')] Attempting to install kernel package with full output..." >&2
-        apt-get install -y linux-image-amd64 2>&1 | tee -a /tmp/apt-install.log || true
+# Install ESSENTIAL packages FIRST (before bulk install which may fail)
+echo "[$(date '+%H:%M:%S')] Installing essential packages (kernel, boot, systemd)..." >&2
+apt-get install -y --no-install-recommends --no-install-suggests \
+    linux-image-amd64 \
+    initramfs-tools \
+    systemd \
+    systemd-sysv \
+    grub-pc \
+    grub-efi-amd64 \
+    2>&1 | tee -a /tmp/apt-install.log || {
+    echo "[$(date '+%H:%M:%S')] ERROR: Essential packages failed!" >&2
+    echo "[$(date '+%H:%M:%S')] Trying alternative kernel packages..." >&2
+    apt-get install -y linux-image-generic linux-headers-generic 2>&1 | tee -a /tmp/apt-install.log || true
+}
+
+# Verify kernel installation - this is CRITICAL
+if [[ ! -f /boot/vmlinuz-* ]]; then
+    echo "[$(date '+%H:%M:%S')] FATAL: Kernel installation failed" >&2
+    dpkg -l | grep linux-image | tee -a /tmp/apt-install.log
+    exit 1
+fi
+echo "[$(date '+%H:%M:%S')] ✓ Essential packages installed (kernel present)" >&2
+
+# Now install all other packages at once (excluding essential packages already handled)
+echo "[$(date '+%H:%M:%S')] Installing remaining optional packages (this may take 10-15 minutes)..." >&2
+# Filter out packages already installed
+declare -a FILTERED_PACKAGES
+for pkg in "${PACKAGES_ARRAY[@]}"; do
+    # Skip essential packages already installed
+    if [[ ! "$pkg" =~ ^(linux-image|linux-headers|initramfs-tools|systemd|grub|efibootmgr)$ ]]; then
+        FILTERED_PACKAGES+=("$pkg")
     fi
+done
+echo "[$(date '+%H:%M:%S')] Optional packages to install: ${#FILTERED_PACKAGES[@]}" >&2
+
+# First attempt: normal installation of optional packages
+if [[ ${#FILTERED_PACKAGES[@]} -gt 0 ]]; then
+    if ! apt-get install -y -qq --no-install-recommends --no-install-suggests "${FILTERED_PACKAGES[@]}" 2>&1 | tee -a /tmp/apt-install.log; then
+        echo "[$(date '+%H:%M:%S')] Warning: Some optional packages failed with broken dependencies" >&2
+        echo "[$(date '+%H:%M:%S')] Attempting to fix broken dependencies (apt-get install -f)..." >&2
+        if ! apt-get install -f -y -qq 2>&1 | tee -a /tmp/apt-install.log; then
+            echo "[$(date '+%H:%M:%S')] Note: Could not auto-fix all dependencies" >&2
+        fi
+
+        # Retry the original failed packages but don't fail if they don't install
+        echo "[$(date '+%H:%M:%S')] Retrying optional packages..." >&2
+        apt-get install -y -qq --no-install-recommends --no-install-suggests "${FILTERED_PACKAGES[@]}" 2>&1 | tee -a /tmp/apt-install.log || true
+        echo "[$(date '+%H:%M:%S')] Note: Continuing with essential packages only if needed" >&2
+    fi
+else
+    echo "[$(date '+%H:%M:%S')] No optional packages to install" >&2
 fi
 
 # Generate locales AFTER packages are installed
@@ -389,13 +434,18 @@ echo "en_US.UTF-8 UTF-8" > /etc/locale.gen
 locale-gen 2>&1 | tee -a /tmp/apt-install.log || true
 update-locale LANG=C.UTF-8 2>&1 | tee -a /tmp/apt-install.log || true
 
-# Verify kernel was installed
+# Verify kernel was installed - CRITICAL CHECK
 if [[ -f /boot/vmlinuz-* ]]; then
-    echo "[$(date '+%H:%M:%S')] Found kernel: $(ls -1 /boot/vmlinuz-* 2>/dev/null || echo 'none')" >&2
+    KERNEL_FILE=$(ls -1 /boot/vmlinuz-* 2>/dev/null | head -1)
+    echo "[$(date '+%H:%M:%S')] ✓ Found kernel: $KERNEL_FILE" >&2
 else
-    echo "[$(date '+%H:%M:%S')] WARNING: No kernel found in /boot, kernel package may have failed to install" >&2
-    echo "[$(date '+%H:%M:%S')] Checking linux-image-amd64 package status..." >&2
-    dpkg -l | grep linux-image-amd64 || echo "linux-image-amd64 not installed" >&2
+    echo "[$(date '+%H:%M:%S')] FATAL: No kernel found in /boot directory" >&2
+    echo "[$(date '+%H:%M:%S')] Checking installed kernel packages:" >&2
+    dpkg -l | grep linux-image || echo "No linux-image packages installed" >&2
+    echo "[$(date '+%H:%M:%S')] Available kernel packages:" >&2
+    apt-cache search "^linux-image-" | head -15 >&2
+    echo "[$(date '+%H:%M:%S')] ERROR: Kernel installation failed - cannot continue" >&2
+    exit 1
 fi
 
 # Verify initramfs-tools is available
@@ -422,16 +472,28 @@ echo "[$(date '+%H:%M:%S')] Package installation complete" >&2
 SCRIPT
 
     chmod +x "$BUILD_WORK/chroot/tmp/install_packages.sh"
-    # Run installation and capture progress messages
-    chroot "$BUILD_WORK/chroot" /tmp/install_packages.sh 2>&1 | while IFS= read -r line; do
+    # Run installation and capture exit code to a temp file (outside chroot)
+    local install_output="$BUILD_WORK/install_output.txt"
+    chroot "$BUILD_WORK/chroot" /tmp/install_packages.sh > "$install_output" 2>&1
+    local install_exit_code=$?
+
+    # Display output with filtering
+    while IFS= read -r line; do
         # Log everything to file
         echo "$line" >> "$LOG_FILE"
 
         # Show progress messages in terminal
-        if [[ "$line" =~ \[.*\]\ (Updating|Installing|Generating|Cleaning|Package\ installation|complete) ]]; then
+        if [[ "$line" =~ \[.*\]\ (Updating|Installing|Generating|Cleaning|Package\ installation|complete|ERROR|FATAL|Kernel) ]]; then
             echo -e "${GREEN}[INST]${NC} $line"
         fi
-    done
+    done < "$install_output"
+
+    if [[ $install_exit_code -ne 0 ]]; then
+        log ERROR "Package installation failed with exit code $install_exit_code"
+        log ERROR "Full installation log:"
+        cat "$install_output" >> "$LOG_FILE"
+        return 1
+    fi
 
     log INFO "Package installation complete"
 }
