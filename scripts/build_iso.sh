@@ -345,39 +345,46 @@ export DEBIAN_FRONTEND=noninteractive
 export LC_ALL=C.UTF-8
 export LANG=C.UTF-8
 
+# Show every command for debugging
+echo "[$(date '+%H:%M:%S')] Starting package installation script" >&2
+echo "[$(date '+%H:%M:%S')] Shell PID: $$" >&2
+
 # Single apt-get update (most efficient)
 echo "[$(date '+%H:%M:%S')] Updating package lists..." >&2
-apt-get update 2>&1 | grep -E "(^Get:|^Err:|error|E:)" | tee /tmp/apt-update.log || true
+timeout 300 apt-get update 2>&1 | tee /tmp/apt-update.log || true
+echo "[$(date '+%H:%M:%S')] Package list update complete" >&2
 
 # Ensure /boot directory exists with proper permissions
+echo "[$(date '+%H:%M:%S')] Ensuring /boot directory..." >&2
 mkdir -p /boot
 chmod 755 /boot
 
 # Check if linux-image-amd64 is available
 echo "[$(date '+%H:%M:%S')] Checking kernel package availability..." >&2
-if apt-cache search linux-image-amd64 | grep -q "^linux-image-amd64"; then
+apt-cache search linux-image-amd64 2>&1 | grep -q "^linux-image-amd64" && {
     echo "[$(date '+%H:%M:%S')] ✓ linux-image-amd64 package found" >&2
-else
+} || {
     echo "[$(date '+%H:%M:%S')] WARNING: linux-image-amd64 not found in repositories" >&2
     echo "[$(date '+%H:%M:%S')] Available linux-image packages:" >&2
-    apt-cache search "^linux-image-" | head -10 >&2
-fi
+    apt-cache search "^linux-image-" 2>&1 | head -10 >&2
+}
 
 # Get package list - ensure proper whitespace handling
+echo "[$(date '+%H:%M:%S')] Counting packages..." >&2
 PACKAGE_COUNT=$(grep -v '^#' /tmp/packages.list | grep -v '^$' | wc -l)
 echo "[$(date '+%H:%M:%S')] Found $PACKAGE_COUNT packages to install..." >&2
 
 # Read all packages into array (safer than passing as string)
+echo "[$(date '+%H:%M:%S')] Reading package list into array..." >&2
 declare -a PACKAGES_ARRAY
 while IFS= read -r pkg; do
     [[ -n "$pkg" ]] && PACKAGES_ARRAY+=("$pkg")
 done < <(grep -v '^#' /tmp/packages.list | grep -v '^$')
-
-echo "[$(date '+%H:%M:%S')] Packages to install: $(echo ${PACKAGES_ARRAY[@]} | tr ' ' '\n' | grep -c .)" >&2
+echo "[$(date '+%H:%M:%S')] Array has ${#PACKAGES_ARRAY[@]} packages" >&2
 
 # Install ESSENTIAL packages FIRST (before bulk install which may fail)
 echo "[$(date '+%H:%M:%S')] Installing essential packages (kernel, boot, systemd)..." >&2
-apt-get install -y --no-install-recommends --no-install-suggests \
+timeout 600 apt-get install -y --no-install-recommends --no-install-suggests \
     linux-image-amd64 \
     initramfs-tools \
     systemd \
@@ -387,8 +394,9 @@ apt-get install -y --no-install-recommends --no-install-suggests \
     2>&1 | tee -a /tmp/apt-install.log || {
     echo "[$(date '+%H:%M:%S')] ERROR: Essential packages failed!" >&2
     echo "[$(date '+%H:%M:%S')] Trying alternative kernel packages..." >&2
-    apt-get install -y linux-image-generic linux-headers-generic 2>&1 | tee -a /tmp/apt-install.log || true
+    timeout 300 apt-get install -y linux-image-generic linux-headers-generic 2>&1 | tee -a /tmp/apt-install.log || true
 }
+echo "[$(date '+%H:%M:%S')] Essential package installation attempt complete" >&2
 
 # Verify kernel installation - this is CRITICAL
 if [[ ! -f /boot/vmlinuz-* ]]; then
@@ -412,18 +420,20 @@ echo "[$(date '+%H:%M:%S')] Optional packages to install: ${#FILTERED_PACKAGES[@
 
 # First attempt: normal installation of optional packages
 if [[ ${#FILTERED_PACKAGES[@]} -gt 0 ]]; then
-    if ! apt-get install -y -qq --no-install-recommends --no-install-suggests "${FILTERED_PACKAGES[@]}" 2>&1 | tee -a /tmp/apt-install.log; then
+    echo "[$(date '+%H:%M:%S')] Starting optional package installation..." >&2
+    if ! timeout 1200 apt-get install -y -qq --no-install-recommends --no-install-suggests "${FILTERED_PACKAGES[@]}" 2>&1 | tee -a /tmp/apt-install.log; then
         echo "[$(date '+%H:%M:%S')] Warning: Some optional packages failed with broken dependencies" >&2
         echo "[$(date '+%H:%M:%S')] Attempting to fix broken dependencies (apt-get install -f)..." >&2
-        if ! apt-get install -f -y -qq 2>&1 | tee -a /tmp/apt-install.log; then
+        if ! timeout 300 apt-get install -f -y -qq 2>&1 | tee -a /tmp/apt-install.log; then
             echo "[$(date '+%H:%M:%S')] Note: Could not auto-fix all dependencies" >&2
         fi
 
         # Retry the original failed packages but don't fail if they don't install
         echo "[$(date '+%H:%M:%S')] Retrying optional packages..." >&2
-        apt-get install -y -qq --no-install-recommends --no-install-suggests "${FILTERED_PACKAGES[@]}" 2>&1 | tee -a /tmp/apt-install.log || true
+        timeout 600 apt-get install -y -qq --no-install-recommends --no-install-suggests "${FILTERED_PACKAGES[@]}" 2>&1 | tee -a /tmp/apt-install.log || true
         echo "[$(date '+%H:%M:%S')] Note: Continuing with essential packages only if needed" >&2
     fi
+    echo "[$(date '+%H:%M:%S')] Optional package installation complete" >&2
 else
     echo "[$(date '+%H:%M:%S')] No optional packages to install" >&2
 fi
@@ -433,8 +443,10 @@ echo "[$(date '+%H:%M:%S')] Generating locales..." >&2
 echo "en_US.UTF-8 UTF-8" > /etc/locale.gen
 locale-gen 2>&1 | tee -a /tmp/apt-install.log || true
 update-locale LANG=C.UTF-8 2>&1 | tee -a /tmp/apt-install.log || true
+echo "[$(date '+%H:%M:%S')] Locale generation complete" >&2
 
 # Verify kernel was installed - CRITICAL CHECK
+echo "[$(date '+%H:%M:%S')] Final kernel verification..." >&2
 if [[ -f /boot/vmlinuz-* ]]; then
     KERNEL_FILE=$(ls -1 /boot/vmlinuz-* 2>/dev/null | head -1)
     echo "[$(date '+%H:%M:%S')] ✓ Found kernel: $KERNEL_FILE" >&2
@@ -443,12 +455,13 @@ else
     echo "[$(date '+%H:%M:%S')] Checking installed kernel packages:" >&2
     dpkg -l | grep linux-image || echo "No linux-image packages installed" >&2
     echo "[$(date '+%H:%M:%S')] Available kernel packages:" >&2
-    apt-cache search "^linux-image-" | head -15 >&2
+    apt-cache search "^linux-image-" 2>&1 | head -15 >&2
     echo "[$(date '+%H:%M:%S')] ERROR: Kernel installation failed - cannot continue" >&2
     exit 1
 fi
 
 # Verify initramfs-tools is available
+echo "[$(date '+%H:%M:%S')] Verifying initramfs-tools..." >&2
 if command -v update-initramfs &>/dev/null; then
     echo "[$(date '+%H:%M:%S')] ✓ initramfs-tools found" >&2
 else
@@ -457,7 +470,8 @@ fi
 
 # Generate initramfs for all installed kernels
 echo "[$(date '+%H:%M:%S')] Generating initramfs..." >&2
-update-initramfs -c -k all 2>&1 | tee -a /tmp/apt-install.log || true
+timeout 300 update-initramfs -c -k all 2>&1 | tee -a /tmp/apt-install.log || true
+echo "[$(date '+%H:%M:%S')] Initramfs generation complete" >&2
 
 # List what's in /boot after everything
 echo "[$(date '+%H:%M:%S')] Boot directory contents:" >&2
