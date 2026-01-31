@@ -198,12 +198,10 @@ parted
 # LOCALIZATION
 # =============================================================================
 
-# Console setup
+# Console setup and locales (must be early to avoid missing locale-gen)
+locales
 console-setup
 keyboard-configuration
-
-# Locale support
-locales
 
 # =============================================================================
 # OPTIONAL HARDWARE SUPPORT
