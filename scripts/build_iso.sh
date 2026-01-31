@@ -742,9 +742,24 @@ create_live_image() {
         -e boot \
         -noappend >> "$LOG_FILE" 2>&1
 
-    # Copy kernel and initrd
-    cp "$chroot/boot/vmlinuz-"* "$image/live/vmlinuz"
-    cp "$chroot/boot/initrd.img-"* "$image/live/initrd"
+    # Copy kernel and initrd with proper error handling
+    log INFO "Extracting kernel and initramfs..."
+
+    # Find and copy kernel
+    if [[ -f "$chroot/boot/vmlinuz-"* ]]; then
+        cp "$chroot/boot/vmlinuz-"* "$image/live/vmlinuz" >> "$LOG_FILE" 2>&1 || log ERROR "Failed to copy kernel"
+    else
+        log ERROR "No kernel found in chroot /boot directory"
+        return 1
+    fi
+
+    # Find and copy initrd
+    if [[ -f "$chroot/boot/initrd.img-"* ]]; then
+        cp "$chroot/boot/initrd.img-"* "$image/live/initrd" >> "$LOG_FILE" 2>&1 || log ERROR "Failed to copy initramfs"
+    else
+        log ERROR "No initramfs found in chroot /boot directory"
+        return 1
+    fi
 
     log INFO "Live image created"
 }
@@ -783,8 +798,14 @@ LABEL memtest
 EOF
     
     # Copy ISOLINUX files
-    cp /usr/lib/ISOLINUX/isolinux.bin "$image/isolinux/"
-    cp /usr/lib/syslinux/modules/bios/{ldlinux.c32,vesamenu.c32,libcom32.c32,libutil.c32} "$image/isolinux/"
+    if ! cp /usr/lib/ISOLINUX/isolinux.bin "$image/isolinux/" >> "$LOG_FILE" 2>&1; then
+        log ERROR "Failed to copy isolinux.bin - is syslinux package installed?"
+        return 1
+    fi
+    if ! cp /usr/lib/syslinux/modules/bios/{ldlinux.c32,vesamenu.c32,libcom32.c32,libutil.c32} "$image/isolinux/" >> "$LOG_FILE" 2>&1; then
+        log ERROR "Failed to copy syslinux modules - is syslinux-common package installed?"
+        return 1
+    fi
     
     # GRUB configuration (UEFI)
     cat > "$image/boot/grub/grub.cfg" << EOF
@@ -810,22 +831,37 @@ EOF
     # Create EFI boot image
     log INFO "Creating EFI boot image..."
     mkdir -p "$image/EFI/boot"
-    
-    grub-mkimage \
+
+    if ! grub-mkimage \
         -o "$image/EFI/boot/bootx64.efi" \
         -O x86_64-efi \
         -p /boot/grub \
         part_gpt part_msdos fat iso9660 normal boot linux configfile \
         loopback chain efifwsetup efi_gop efi_uga ls search \
         search_label search_fs_uuid search_fs_file gfxterm gfxmenu \
-        gfxterm_background gfxterm_menu test all_video loadenv exfat ext2
+        gfxterm_background gfxterm_menu test all_video loadenv exfat ext2 >> "$LOG_FILE" 2>&1; then
+        log ERROR "Failed to create EFI boot image"
+        return 1
+    fi
     
     # Create EFI System Partition image
-    truncate -s 10M "$BUILD_WORK/scratch/efi.img"
-    mkfs.vfat -F 12 "$BUILD_WORK/scratch/efi.img"
-    mmd -i "$BUILD_WORK/scratch/efi.img" ::/EFI
-    mmd -i "$BUILD_WORK/scratch/efi.img" ::/EFI/boot
-    mcopy -i "$BUILD_WORK/scratch/efi.img" "$image/EFI/boot/bootx64.efi" ::/EFI/boot/
+    truncate -s 10M "$BUILD_WORK/scratch/efi.img" || log ERROR "Failed to create EFI image file"
+    if ! mkfs.vfat -F 12 "$BUILD_WORK/scratch/efi.img" >> "$LOG_FILE" 2>&1; then
+        log ERROR "Failed to format EFI image"
+        return 1
+    fi
+    if ! mmd -i "$BUILD_WORK/scratch/efi.img" ::/EFI >> "$LOG_FILE" 2>&1; then
+        log ERROR "Failed to create EFI directory structure"
+        return 1
+    fi
+    if ! mmd -i "$BUILD_WORK/scratch/efi.img" ::/EFI/boot >> "$LOG_FILE" 2>&1; then
+        log ERROR "Failed to create EFI/boot directory"
+        return 1
+    fi
+    if ! mcopy -i "$BUILD_WORK/scratch/efi.img" "$image/EFI/boot/bootx64.efi" ::/EFI/boot/ >> "$LOG_FILE" 2>&1; then
+        log ERROR "Failed to copy bootx64.efi to EFI image"
+        return 1
+    fi
     
     log INFO "Bootloader configuration complete"
 }
@@ -837,7 +873,7 @@ create_iso() {
     local iso_file="$BUILD_OUTPUT/displayos-${BUILD_ARCH}.iso"
 
     # Redirect xorriso output to log
-    xorriso \
+    if ! xorriso \
         -as mkisofs \
         -iso-level 3 \
         -full-iso9660-filenames \
@@ -855,13 +891,28 @@ create_iso() {
         -isohybrid-gpt-basdat \
         -append_partition 2 0xef "$BUILD_WORK/scratch/efi.img" \
         -output "$iso_file" \
-        "$image" >> "$LOG_FILE" 2>&1
+        "$image" >> "$LOG_FILE" 2>&1; then
+        log ERROR "Failed to create ISO with xorriso"
+        return 1
+    fi
+
+    # Verify ISO was created
+    if [[ ! -f "$iso_file" ]]; then
+        log ERROR "ISO file was not created: $iso_file"
+        return 1
+    fi
 
     # Calculate checksum
     log INFO "Calculating checksums..."
     cd "$BUILD_OUTPUT"
-    sha256sum "displayos-${BUILD_ARCH}.iso" > "displayos-${BUILD_ARCH}.iso.sha256"
-    md5sum "displayos-${BUILD_ARCH}.iso" > "displayos-${BUILD_ARCH}.iso.md5"
+    if ! sha256sum "displayos-${BUILD_ARCH}.iso" > "displayos-${BUILD_ARCH}.iso.sha256" 2>&1; then
+        log ERROR "Failed to calculate SHA256 checksum"
+        return 1
+    fi
+    if ! md5sum "displayos-${BUILD_ARCH}.iso" > "displayos-${BUILD_ARCH}.iso.md5" 2>&1; then
+        log ERROR "Failed to calculate MD5 checksum"
+        return 1
+    fi
 
     log INFO "ISO created: $iso_file"
     log INFO "Size: $(du -h "$iso_file" | cut -f1)"
