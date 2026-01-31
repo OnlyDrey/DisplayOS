@@ -344,6 +344,10 @@ export LANG=C.UTF-8
 echo "[$(date '+%H:%M:%S')] Updating package lists..." >&2
 apt-get update 2>&1 | grep -E "(^Get:|^Err:|error|E:)" | tee /tmp/apt-update.log || true
 
+# Ensure /boot directory exists with proper permissions
+mkdir -p /boot
+chmod 755 /boot
+
 # Check if linux-image-amd64 is available
 echo "[$(date '+%H:%M:%S')] Checking kernel package availability..." >&2
 if apt-cache search linux-image-amd64 | grep -q "^linux-image-amd64"; then
@@ -392,6 +396,13 @@ else
     echo "[$(date '+%H:%M:%S')] WARNING: No kernel found in /boot, kernel package may have failed to install" >&2
     echo "[$(date '+%H:%M:%S')] Checking linux-image-amd64 package status..." >&2
     dpkg -l | grep linux-image-amd64 || echo "linux-image-amd64 not installed" >&2
+fi
+
+# Verify initramfs-tools is available
+if command -v update-initramfs &>/dev/null; then
+    echo "[$(date '+%H:%M:%S')] ✓ initramfs-tools found" >&2
+else
+    echo "[$(date '+%H:%M:%S')] WARNING: update-initramfs not found, initramfs-tools may not be installed" >&2
 fi
 
 # Generate initramfs for all installed kernels
