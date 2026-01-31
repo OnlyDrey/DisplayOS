@@ -14,6 +14,7 @@
 #   --clean           Clean build directory before starting
 #   --debug           Enable debug mode (verbose output)
 #   --no-luks         Disable LUKS encryption in installer
+#   --skip-security   Skip security hardening (for testing/development)
 #   --help            Show this help message
 #
 # Requirements:
@@ -43,6 +44,8 @@ BUILD_WORK="$PROJECT_ROOT/build"
 BUILD_CLEAN=false
 BUILD_DEBUG=false
 ENABLE_LUKS=true
+SKIP_SECURITY=false
+APT_NO_RECOMMENDS=true
 
 # Debian configuration
 readonly DEBIAN_VERSION="bookworm"
@@ -153,12 +156,14 @@ ${BOLD}Options:${NC}
     --clean           Clean build directory before starting
     --debug           Enable debug mode (verbose output)
     --no-luks         Disable LUKS encryption in installer
+    --skip-security   Skip security hardening (for testing/development)
     --help            Show this help message
 
 ${BOLD}Examples:${NC}
-    sudo $0                          # Build amd64 ISO
+    sudo $0                          # Build amd64 ISO with security hardening
     sudo $0 --arch=arm64             # Build ARM64 ISO
     sudo $0 --clean --debug          # Clean build with debug output
+    sudo $0 --skip-security          # Build without security hardening
 
 ${BOLD}Requirements:${NC}
     - Debian-based build system (Debian 12 Bookworm recommended)
@@ -314,6 +319,18 @@ install_packages() {
     # Copy package list to chroot
     cp "$PROJECT_ROOT/src/packages.list" "$BUILD_WORK/chroot/tmp/"
 
+    # Create APT configuration to optimize installation
+    cat > "$BUILD_WORK/chroot/etc/apt/apt.conf.d/99-displayos-optimize" << 'APTCONF'
+// Reduce packages and I/O load
+APT::Install-Recommends "false";
+APT::Install-Suggests "false";
+APT::Get::AutomaticRemove "true";
+APT::Get::Purge "true";
+
+// Faster, less verbose output
+quiet "1";
+APTCONF
+
     # Create installation script with locale fixes and proper error handling
     cat > "$BUILD_WORK/chroot/tmp/install_packages.sh" << 'SCRIPT'
 #!/bin/bash
@@ -328,26 +345,41 @@ export LANG=C.UTF-8
 locale-gen en_US.UTF-8 2>/dev/null || true
 update-locale LANG=C.UTF-8 2>/dev/null || true
 
-# Update package lists
-apt-get update 2>&1 | tee /tmp/apt-update.log
+# Single apt-get update (most efficient)
+echo "[$(date '+%H:%M:%S')] Updating package lists..." >&2
+apt-get update -qq 2>&1 | grep -E "(^Get:|^Err:|error|E:)" | tee /tmp/apt-update.log || true
 
-# Install packages from list
-COUNT=0
-TOTAL=$(grep -v '^#' /tmp/packages.list | grep -v '^$' | wc -l)
+# Get package list (split into multiple chunks to reduce memory usage)
+PACKAGES=$(grep -v '^#' /tmp/packages.list | grep -v '^$' | tr '\n' ' ')
+PACKAGE_COUNT=$(grep -v '^#' /tmp/packages.list | grep -v '^$' | wc -l)
 
-grep -v '^#' /tmp/packages.list | grep -v '^$' | while read -r pkg; do
-    COUNT=$((COUNT+1))
-    apt-get install -y "$pkg" 2>&1 | tee -a /tmp/apt-install.log
-done
+# Install ALL packages at once (single apt-get call - much faster and less network overhead)
+echo "[$(date '+%H:%M:%S')] Installing $PACKAGE_COUNT packages (this may take 10-15 minutes)..." >&2
+apt-get install -y -qq --no-install-recommends --no-install-suggests $PACKAGES 2>&1 | grep -E "(^Get:|^Unpacking|^Setting up|^Preparing|error|E:|warning|W:)" | tee /tmp/apt-install.log || true
 
-# Clean up
+# Generate initramfs for all installed kernels
+echo "[$(date '+%H:%M:%S')] Generating initramfs..." >&2
+update-initramfs -c -k all 2>&1 | tee -a /tmp/apt-install.log || true
+
+# Clean up package cache
+echo "[$(date '+%H:%M:%S')] Cleaning up..." >&2
 apt-get clean
 rm -rf /var/lib/apt/lists/*
+
+echo "[$(date '+%H:%M:%S')] Package installation complete" >&2
 SCRIPT
 
     chmod +x "$BUILD_WORK/chroot/tmp/install_packages.sh"
-    # Redirect all output to log file only
-    chroot "$BUILD_WORK/chroot" /tmp/install_packages.sh >> "$LOG_FILE" 2>&1
+    # Run installation and capture progress messages
+    chroot "$BUILD_WORK/chroot" /tmp/install_packages.sh 2>&1 | while IFS= read -r line; do
+        # Log everything to file
+        echo "$line" >> "$LOG_FILE"
+
+        # Show progress messages in terminal
+        if [[ "$line" =~ \[.*\]\ (Updating|Installing|Generating|Cleaning|Package\ installation|complete) ]]; then
+            echo -e "${GREEN}[INST]${NC} $line"
+        fi
+    done
 
     log INFO "Package installation complete"
 }
@@ -710,6 +742,11 @@ SCRIPT
 }
 
 configure_security() {
+    if [[ "$SKIP_SECURITY" == true ]]; then
+        log STEP "Skipping security hardening (--skip-security flag set)"
+        return
+    fi
+
     log STEP "Applying security hardening"
 
     local chroot="$BUILD_WORK/chroot"
@@ -941,6 +978,9 @@ main() {
             --no-luks)
                 ENABLE_LUKS=false
                 ;;
+            --skip-security)
+                SKIP_SECURITY=true
+                ;;
             --help)
                 show_help
                 exit 0
@@ -970,7 +1010,13 @@ main() {
     echo -e "${BOLD}========================================${NC}"
     echo -e "Architecture: ${GREEN}$BUILD_ARCH${NC}"
     echo -e "Output: ${GREEN}$BUILD_OUTPUT${NC}"
-    echo -e "Log: ${GREEN}$LOG_FILE${NC}\n"
+    echo -e "Log: ${GREEN}$LOG_FILE${NC}"
+    if [[ "$SKIP_SECURITY" == true ]]; then
+        echo -e "Security: ${YELLOW}DISABLED (--skip-security)${NC}"
+    else
+        echo -e "Security: ${GREEN}Enabled${NC}"
+    fi
+    echo -e ""
     
     # Run build steps
     check_dependencies

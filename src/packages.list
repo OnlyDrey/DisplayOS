@@ -20,6 +20,7 @@ udev
 # Kernel and boot
 linux-image-amd64
 linux-headers-amd64
+initramfs-tools
 
 # Init and boot
 grub-pc
