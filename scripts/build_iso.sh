@@ -178,7 +178,7 @@ check_root() {
 
 check_dependencies() {
     log STEP "Checking build dependencies"
-    
+
     local deps=(
         git
         wget
@@ -196,42 +196,38 @@ check_dependencies() {
         wget
         curl
     )
-    
+
     local missing=()
-    
+
     for dep in "${deps[@]}"; do
         if ! dpkg -l "$dep" &>/dev/null; then
             missing+=("$dep")
         fi
     done
-    
+
     if [[ ${#missing[@]} -gt 0 ]]; then
         log INFO "Installing missing dependencies: ${missing[*]}"
-        apt-get update
-        apt-get install -y "${missing[@]}"
+        apt-get update >> "$LOG_FILE" 2>&1
+        apt-get install -y "${missing[@]}" >> "$LOG_FILE" 2>&1
     fi
-    
+
     log INFO "All dependencies satisfied"
 }
 
 cleanup() {
-    log STEP "Cleaning up"
-    
-    # Unmount any mounted filesystems
+    # Unmount any mounted filesystems (redirect to log)
     if mountpoint -q "$BUILD_WORK/chroot/proc" 2>/dev/null; then
-        umount -lf "$BUILD_WORK/chroot/proc" || true
+        umount -lf "$BUILD_WORK/chroot/proc" >> "$LOG_FILE" 2>&1 || true
     fi
     if mountpoint -q "$BUILD_WORK/chroot/sys" 2>/dev/null; then
-        umount -lf "$BUILD_WORK/chroot/sys" || true
+        umount -lf "$BUILD_WORK/chroot/sys" >> "$LOG_FILE" 2>&1 || true
     fi
     if mountpoint -q "$BUILD_WORK/chroot/dev/pts" 2>/dev/null; then
-        umount -lf "$BUILD_WORK/chroot/dev/pts" || true
+        umount -lf "$BUILD_WORK/chroot/dev/pts" >> "$LOG_FILE" 2>&1 || true
     fi
     if mountpoint -q "$BUILD_WORK/chroot/dev" 2>/dev/null; then
-        umount -lf "$BUILD_WORK/chroot/dev" || true
+        umount -lf "$BUILD_WORK/chroot/dev" >> "$LOG_FILE" 2>&1 || true
     fi
-    
-    log INFO "Cleanup complete"
 }
 
 trap cleanup EXIT
@@ -257,20 +253,21 @@ prepare_build_environment() {
 
 bootstrap_debian() {
     log STEP "Bootstrapping Debian $DEBIAN_VERSION ($BUILD_ARCH)"
-    
+
     if [[ -f "$BUILD_WORK/chroot/etc/debian_version" ]]; then
         log INFO "Chroot already exists, skipping bootstrap"
         return
     fi
-    
+
+    # Redirect all debootstrap output to log file only
     debootstrap \
         --arch="$BUILD_ARCH" \
         --variant=minbase \
         --components=main,contrib,non-free,non-free-firmware \
         "$DEBIAN_VERSION" \
         "$BUILD_WORK/chroot" \
-        "$DEBIAN_MIRROR"
-    
+        "$DEBIAN_MIRROR" >> "$LOG_FILE" 2>&1
+
     log INFO "Bootstrap complete"
 }
 
@@ -305,8 +302,8 @@ EOF
 
     # Setup locale configuration to suppress warnings
     echo "en_US.UTF-8 UTF-8" > "$BUILD_WORK/chroot/etc/locale.gen"
-    chroot "$BUILD_WORK/chroot" locale-gen 2>/dev/null || true
-    chroot "$BUILD_WORK/chroot" update-locale LANG=C.UTF-8 2>/dev/null || true
+    chroot "$BUILD_WORK/chroot" locale-gen >> "$LOG_FILE" 2>&1 || true
+    chroot "$BUILD_WORK/chroot" update-locale LANG=C.UTF-8 >> "$LOG_FILE" 2>&1 || true
 
     log INFO "Chroot configuration complete"
 }
@@ -331,22 +328,17 @@ export LANG=C.UTF-8
 locale-gen en_US.UTF-8 2>/dev/null || true
 update-locale LANG=C.UTF-8 2>/dev/null || true
 
-# Update package lists (suppress output, show only errors)
-echo "Updating package lists..." >&2
-apt-get update 2>&1 | grep -E "(^E:|^Err:|error)" || true
+# Update package lists
+apt-get update 2>&1 | tee /tmp/apt-update.log
 
-# Install packages from list (suppress detailed output, show warnings and errors)
-echo "Installing packages..." >&2
+# Install packages from list
 COUNT=0
 TOTAL=$(grep -v '^#' /tmp/packages.list | grep -v '^$' | wc -l)
 
 grep -v '^#' /tmp/packages.list | grep -v '^$' | while read -r pkg; do
     COUNT=$((COUNT+1))
-    # Use -qq to suppress output, but capture errors
-    apt-get install -y "$pkg" 2>&1 | grep -E "(^E:|^W:|warning|error)" || true
+    apt-get install -y "$pkg" 2>&1 | tee -a /tmp/apt-install.log
 done
-
-echo "Package installation complete." >&2
 
 # Clean up
 apt-get clean
@@ -354,25 +346,20 @@ rm -rf /var/lib/apt/lists/*
 SCRIPT
 
     chmod +x "$BUILD_WORK/chroot/tmp/install_packages.sh"
-    chroot "$BUILD_WORK/chroot" /tmp/install_packages.sh 2>&1 | while IFS= read -r line; do
-        if [[ "$line" =~ (^E:|^W:|warning|error|Error|Warning) ]]; then
-            log WARN "$line"
-        else
-            log_output "$line"
-        fi
-    done
+    # Redirect all output to log file only
+    chroot "$BUILD_WORK/chroot" /tmp/install_packages.sh >> "$LOG_FILE" 2>&1
 
     log INFO "Package installation complete"
 }
 
 configure_system() {
     log STEP "Configuring DisplayOS system"
-    
+
     local chroot="$BUILD_WORK/chroot"
-    
-    # Create displayos user
-    chroot "$chroot" useradd -m -s /bin/bash -G sudo,audio,video,netdev displayos || true
-    echo "displayos:displayos" | chroot "$chroot" chpasswd
+
+    # Create displayos user (redirect to log)
+    chroot "$chroot" useradd -m -s /bin/bash -G sudo,audio,video,netdev displayos >> "$LOG_FILE" 2>&1 || true
+    echo "displayos:displayos" | chroot "$chroot" chpasswd >> "$LOG_FILE" 2>&1
     
     # Create DisplayOS directories
     mkdir -p "$chroot/etc/displayos"
@@ -396,12 +383,12 @@ configure_system() {
     # Configure Openbox for kiosk
     configure_openbox "$chroot"
     
-    # Enable services (suppress systemd warnings in chroot)
-    chroot "$chroot" systemctl enable displayos-kiosk.service 2>&1 | grep -E "(error|Error)" || true
-    chroot "$chroot" systemctl enable displayos-watchdog.service 2>&1 | grep -E "(error|Error)" || true
-    chroot "$chroot" systemctl enable displayos-shortcuts.service 2>&1 | grep -E "(error|Error)" || true
-    chroot "$chroot" systemctl enable NetworkManager.service 2>&1 | grep -E "(error|Error)" || true
-    
+    # Enable services (redirect to log, suppress systemd warnings in chroot)
+    chroot "$chroot" systemctl enable displayos-kiosk.service >> "$LOG_FILE" 2>&1 || true
+    chroot "$chroot" systemctl enable displayos-watchdog.service >> "$LOG_FILE" 2>&1 || true
+    chroot "$chroot" systemctl enable displayos-shortcuts.service >> "$LOG_FILE" 2>&1 || true
+    chroot "$chroot" systemctl enable NetworkManager.service >> "$LOG_FILE" 2>&1 || true
+
     log INFO "System configuration complete"
 }
 
@@ -719,7 +706,7 @@ SCRIPT
     chmod +x "$chroot/usr/local/bin/displayos-exit-kiosk"
     
     # Set ownership
-    chroot "$chroot" chown -R displayos:displayos /home/displayos
+    chroot "$chroot" chown -R displayos:displayos /home/displayos >> "$LOG_FILE" 2>&1
 }
 
 configure_security() {
@@ -730,44 +717,35 @@ configure_security() {
     # Copy and run security setup script
     cp "$PROJECT_ROOT/scripts/setup_security.sh" "$chroot/tmp/"
     chmod +x "$chroot/tmp/setup_security.sh"
-    chroot "$chroot" /tmp/setup_security.sh 2>&1 | while IFS= read -r line; do
-        if [[ "$line" =~ (STEP|ERROR|WARN) ]]; then
-            log_output "$line"
-            # Show steps in terminal too
-            if [[ "$line" =~ "==>" ]]; then
-                echo -e "${BLUE}$line${NC}"
-            fi
-        else
-            log_output "$line"
-        fi
-    done
+    # Redirect all security setup output to log file
+    chroot "$chroot" /tmp/setup_security.sh >> "$LOG_FILE" 2>&1
 
     log INFO "Security hardening complete"
 }
 
 create_live_image() {
     log STEP "Creating live image"
-    
+
     local chroot="$BUILD_WORK/chroot"
     local image="$BUILD_WORK/image"
-    
+
     # Unmount chroot filesystems
-    umount -lf "$chroot/proc" || true
-    umount -lf "$chroot/sys" || true
-    umount -lf "$chroot/dev/pts" || true
-    umount -lf "$chroot/dev" || true
-    
-    # Create squashfs filesystem
+    umount -lf "$chroot/proc" >> "$LOG_FILE" 2>&1 || true
+    umount -lf "$chroot/sys" >> "$LOG_FILE" 2>&1 || true
+    umount -lf "$chroot/dev/pts" >> "$LOG_FILE" 2>&1 || true
+    umount -lf "$chroot/dev" >> "$LOG_FILE" 2>&1 || true
+
+    # Create squashfs filesystem (redirect to log)
     log INFO "Creating squashfs filesystem..."
     mksquashfs "$chroot" "$image/live/filesystem.squashfs" \
         -comp xz \
         -e boot \
-        -noappend
-    
+        -noappend >> "$LOG_FILE" 2>&1
+
     # Copy kernel and initrd
     cp "$chroot/boot/vmlinuz-"* "$image/live/vmlinuz"
     cp "$chroot/boot/initrd.img-"* "$image/live/initrd"
-    
+
     log INFO "Live image created"
 }
 
@@ -854,10 +832,11 @@ EOF
 
 create_iso() {
     log STEP "Creating ISO image"
-    
+
     local image="$BUILD_WORK/image"
     local iso_file="$BUILD_OUTPUT/displayos-${BUILD_ARCH}.iso"
-    
+
+    # Redirect xorriso output to log
     xorriso \
         -as mkisofs \
         -iso-level 3 \
@@ -876,14 +855,14 @@ create_iso() {
         -isohybrid-gpt-basdat \
         -append_partition 2 0xef "$BUILD_WORK/scratch/efi.img" \
         -output "$iso_file" \
-        "$image"
-    
+        "$image" >> "$LOG_FILE" 2>&1
+
     # Calculate checksum
     log INFO "Calculating checksums..."
     cd "$BUILD_OUTPUT"
     sha256sum "displayos-${BUILD_ARCH}.iso" > "displayos-${BUILD_ARCH}.iso.sha256"
     md5sum "displayos-${BUILD_ARCH}.iso" > "displayos-${BUILD_ARCH}.iso.md5"
-    
+
     log INFO "ISO created: $iso_file"
     log INFO "Size: $(du -h "$iso_file" | cut -f1)"
 }
