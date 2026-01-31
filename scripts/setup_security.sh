@@ -343,7 +343,8 @@ set_secure_permissions() {
 
 configure_kernel_hardening() {
     log STEP "Configuring kernel hardening parameters"
-    
+
+    mkdir -p /etc/sysctl.d
     cat > /etc/sysctl.d/99-displayos-security.conf << 'EOF'
 # DisplayOS Kernel Security Parameters
 net.ipv4.ip_forward = 0
