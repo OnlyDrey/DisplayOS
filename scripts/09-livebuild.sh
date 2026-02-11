@@ -52,6 +52,13 @@ echo ""
 # We'll capture the output and show key milestones
 (
   sudo lb build 2>&1 | tee -a "${LOG_FILE}" | while IFS= read -r line; do
+    # Skip package management output
+    case "$line" in
+      *"Get:"*|*"Selecting previously"*|*"Preparing to unpack"*|*"Unpacking "*|*"Setting up "*|*"Removing "*|*"Writing to"*"completed successfully"*)
+        continue
+        ;;
+    esac
+
     case "$line" in
       *"[0m lb bootstrap_debootstrap"*)
         echo -e "${YELLOW}  → Bootstrapping base system (debootstrap)...${NOCOLOR}"
@@ -59,24 +66,35 @@ echo ""
       *"[0m lb chroot_linux-image"*)
         echo -e "${YELLOW}  → Installing Linux kernel...${NOCOLOR}"
         ;;
-      *"[0m lb chroot_archives"*|*"chroot_apt"*)
-        echo -e "${YELLOW}  → Configuring APT repositories...${NOCOLOR}"
-        ;;
       *"[0m lb chroot_hooks"*)
         echo -e "${YELLOW}  → Running chroot hooks (system configuration)...${NOCOLOR}"
         ;;
       *"[0m lb binary_rootfs"*)
         echo -e "${YELLOW}  → Creating root filesystem (squashfs compression)...${NOCOLOR}"
         ;;
-      *"Creating"*"filesystem"*|*"mksquashfs"*)
-        # Show squashfs creation progress
+      *"Parallel mksquashfs"*|*"Creating"*"filesystem on"*)
+        # Show squashfs info and creation
+        echo "$line"
+        ;;
+      "["*"]"*"%"*)
+        # Show squashfs progress bars [====] percentage
         echo "$line"
         ;;
       *"[0m lb binary_iso"*)
         echo -e "${YELLOW}  → Building ISO image (xorriso)...${NOCOLOR}"
         ;;
-      *"xorriso"*|*"ISO image"*|*".iso"*|*"Writing"*|*"UPDATE"*)
-        # Show xorriso output (ISO creation)
+      "xorriso "*":"*)
+        # Show xorriso command output (must start with "xorriso " and contain ":")
+        echo "$line"
+        ;;
+      *"Added to ISO image:"*)
+        echo "$line"
+        ;;
+      *"UPDATE :"*"%"*)
+        # Show xorriso UPDATE progress with percentage
+        echo "$line"
+        ;;
+      *"ISO image produced:"*)
         echo "$line"
         ;;
     esac
