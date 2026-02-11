@@ -50,8 +50,9 @@ echo ""
 
 # Run lb build with progress indicators
 # We'll capture the output and show key milestones
+# Use stdbuf to disable output buffering for real-time progress
 (
-  sudo lb build 2>&1 | tee -a "${LOG_FILE}" | while IFS= read -r line; do
+  stdbuf -oL sudo lb build 2>&1 | tee -a "${LOG_FILE}" | stdbuf -oL grep --line-buffered -v '^$' | while IFS= read -r line; do
     # Skip package management output
     case "$line" in
       *"Get:"*|*"Selecting previously"*|*"Preparing to unpack"*|*"Unpacking "*|*"Setting up "*|*"Removing "*|*"Writing to"*"completed successfully"*)
@@ -72,10 +73,6 @@ echo ""
       *"[0m lb binary_rootfs"*)
         echo -e "${YELLOW}  → Creating root filesystem (squashfs compression)...${NOCOLOR}"
         ;;
-      *"P: Preparing squashfs"*|*"P: This may take"*)
-        # Show squashfs preparation messages
-        echo "$line"
-        ;;
       *"Parallel mksquashfs"*|*"Creating"*"filesystem on"*)
         # Show squashfs info and creation
         echo "$line"
@@ -83,11 +80,11 @@ echo ""
       *"["*"]"*"/"*"%"*)
         # Show squashfs progress bars [====] 12345/67890 XX% - update dynamically
         if [[ "$line" == *"100%"* ]]; then
-          # Final progress - output with newline
-          echo -e "\r$line"
+          # Final progress - clear line, write with newline
+          echo -e "\033[2K\r$line"
         else
-          # Intermediate progress - overwrite same line
-          echo -en "\r$line"
+          # Intermediate progress - clear line and overwrite same line (no newline)
+          echo -en "\033[2K\r$line"
         fi
         ;;
       *"Unrecognised xattr prefix"*)
