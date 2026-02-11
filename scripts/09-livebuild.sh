@@ -72,12 +72,30 @@ echo ""
       *"[0m lb binary_rootfs"*)
         echo -e "${YELLOW}  → Creating root filesystem (squashfs compression)...${NOCOLOR}"
         ;;
+      *"P: Preparing squashfs"*|*"P: This may take"*)
+        # Show squashfs preparation messages
+        echo "$line"
+        ;;
       *"Parallel mksquashfs"*|*"Creating"*"filesystem on"*)
         # Show squashfs info and creation
         echo "$line"
         ;;
-      "["*"]"*"%"*)
-        # Show squashfs progress bars [====] percentage
+      *"["*"]"*"/"*"%"*)
+        # Show squashfs progress bars [====] 12345/67890 XX% - update dynamically
+        if [[ "$line" == *"100%"* ]]; then
+          # Final progress - output with newline
+          echo -e "\r$line"
+        else
+          # Intermediate progress - overwrite same line
+          echo -en "\r$line"
+        fi
+        ;;
+      *"Unrecognised xattr prefix"*)
+        # Show xattr warnings during squashfs creation
+        echo "$line"
+        ;;
+      *"Exportable Squashfs"*|*"compressed"*"data block size"*)
+        # Show final squashfs filesystem info
         echo "$line"
         ;;
       *"[0m lb binary_iso"*)
