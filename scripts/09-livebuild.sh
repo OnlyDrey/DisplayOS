@@ -50,9 +50,9 @@ echo ""
 
 # Run lb build with progress indicators
 # We'll capture the output and show key milestones
-# Use stdbuf to disable output buffering for real-time progress
+# Use script to allocate pseudo-TTY for real-time progress bars
 (
-  stdbuf -oL sudo lb build 2>&1 | tee -a "${LOG_FILE}" | stdbuf -oL grep --line-buffered -v '^$' | while IFS= read -r line; do
+  script -qfc "sudo lb build 2>&1" /dev/null | tee -a "${LOG_FILE}" | while IFS= read -r line; do
     # Skip package management output
     case "$line" in
       *"Get:"*|*"Selecting previously"*|*"Preparing to unpack"*|*"Unpacking "*|*"Setting up "*|*"Removing "*|*"Writing to"*"completed successfully"*)
