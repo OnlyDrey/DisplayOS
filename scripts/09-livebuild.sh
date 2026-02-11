@@ -68,10 +68,14 @@ echo ""
       *"[0m lb binary_rootfs"*)
         echo -e "${YELLOW}  → Creating root filesystem (squashfs compression)...${NOCOLOR}"
         ;;
+      *"Creating"*"filesystem"*|*"mksquashfs"*)
+        # Show squashfs creation progress
+        echo "$line"
+        ;;
       *"[0m lb binary_iso"*)
         echo -e "${YELLOW}  → Building ISO image (xorriso)...${NOCOLOR}"
         ;;
-      *"xorriso"*|*"ISO image"*|*".iso"*)
+      *"xorriso"*|*"ISO image"*|*".iso"*|*"Writing"*|*"UPDATE"*)
         # Show xorriso output (ISO creation)
         echo "$line"
         ;;
