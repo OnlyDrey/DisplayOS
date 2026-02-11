@@ -14,6 +14,7 @@ mkdir -p \
   "${CONFIG_DIR}/includes.chroot/etc/apt" \
   "${CONFIG_DIR}/includes.chroot/etc/xdg/autostart" \
   "${CONFIG_DIR}/includes.chroot/usr/local/bin" \
+  "${CONFIG_DIR}/includes.chroot/boot/grub" \
   "${CONFIG_DIR}/includes.binary/isolinux" \
   "${CONFIG_DIR}/includes.binary/boot/grub" \
   "${CONFIG_DIR}/includes.binary/preseed"
