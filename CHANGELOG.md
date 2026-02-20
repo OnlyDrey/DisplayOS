@@ -5,6 +5,18 @@ All notable changes to DisplayOS will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1] - 2026-02-20
+
+### Added
+
+- **`unclutter` autostart** — the mouse cursor is now automatically hidden after 3 seconds of inactivity via a system-wide XDG autostart entry (`/etc/xdg/autostart/unclutter.desktop`) that runs `unclutter -idle 3` on XFCE session start. Previously `unclutter` was installed but never launched.
+- **NTP time synchronization** — `systemd-timesyncd` (already in the package list) is now enabled as a system service at build time via the new `072-timesyncd.chroot` hook. Debian NTP pool servers are pre-configured in `/etc/systemd/timesyncd.conf.d/displayos.conf`, so the clock synchronizes automatically on first boot without any manual steps.
+
+### Documentation
+
+- [System Behavior](docs/SystemBehavior.md) — added **Time Synchronization** section covering `timedatectl status`, `set-ntp`, `set-timezone`, `show-timesync --all`, and custom NTP server configuration.
+- [System Behavior](docs/SystemBehavior.md) — updated boot sequence diagram and Desktop Environment section to reflect that `unclutter -idle 3` now starts via XDG autostart (not a separate `unclutter-startup` package).
+
 ## [1.0.0] - 2026-02-11
 
 ### Added
