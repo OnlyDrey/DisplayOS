@@ -390,4 +390,42 @@ echo "[DisplayOS] PipeWire services enabled globally."
 EOF
 chmod +x "${CONFIG_DIR}/hooks/normal/070-audio.chroot"
 
+# Hook: Unclutter (hide mouse cursor after 3 seconds of inactivity)
+cat > "${CONFIG_DIR}/hooks/normal/071-unclutter.chroot" <<'EOF'
+#!/bin/sh
+set -eu
+
+mkdir -p /etc/xdg/autostart
+cat > /etc/xdg/autostart/unclutter.desktop <<'EOD'
+[Desktop Entry]
+Type=Application
+Name=Unclutter
+Comment=Hide mouse cursor after 3 seconds of inactivity
+Exec=unclutter -idle 3
+X-GNOME-Autostart-enabled=true
+NoDisplay=true
+EOD
+
+echo "[DisplayOS] unclutter autostart entry created (idle timeout: 3 seconds)."
+EOF
+chmod +x "${CONFIG_DIR}/hooks/normal/071-unclutter.chroot"
+
+# Hook: systemd-timesyncd (NTP time synchronization)
+cat > "${CONFIG_DIR}/hooks/normal/072-timesyncd.chroot" <<'EOF'
+#!/bin/sh
+set -eu
+
+systemctl enable systemd-timesyncd || true
+
+mkdir -p /etc/systemd/timesyncd.conf.d
+cat > /etc/systemd/timesyncd.conf.d/displayos.conf <<'EOC'
+[Time]
+NTP=0.debian.pool.ntp.org 1.debian.pool.ntp.org 2.debian.pool.ntp.org 3.debian.pool.ntp.org
+FallbackNTP=0.pool.ntp.org 1.pool.ntp.org
+EOC
+
+echo "[DisplayOS] systemd-timesyncd enabled with NTP servers configured."
+EOF
+chmod +x "${CONFIG_DIR}/hooks/normal/072-timesyncd.chroot"
+
 echo -e "${GREEN}[✓] Chroot hooks generated${NOCOLOR}"
