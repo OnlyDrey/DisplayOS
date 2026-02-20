@@ -6,19 +6,23 @@ After installation, the system follows this boot path:
 
 ```
 GRUB  -->  systemd  -->  LightDM (autologin as configured user)
-                              |
-                              +--> XFCE session for user
-                                     |
-                                     +--> displayos-kiosk (autostart)
-                                     +--> displayos-apply-wallpaper (autostart)
+               |               |
+               |               +--> XFCE session for user
+               |                      |
+               |                      +--> displayos-kiosk (autostart)
+               |                      +--> displayos-apply-wallpaper (autostart)
+               |                      +--> unclutter -idle 3 (autostart)
+               |
+               +--> systemd-timesyncd (NTP sync, system service)
 ```
 
 1. **GRUB** boots the kernel with the `PRODUCT_NAME` branding and custom background.
-2. **systemd** starts services, including LightDM display manager.
+2. **systemd** starts services, including LightDM display manager and `systemd-timesyncd` for NTP time synchronization.
 3. **LightDM** automatically logs in the configured user (set via `SET_USERNAME` in `config.env`).
 4. **XFCE** starts for the user and triggers autostart entries:
    - `displayos-kiosk` — the kiosk browser launcher (in user's home directory).
    - `displayos-apply-wallpaper` — applies the wallpaper to XFCE desktop (system-wide autostart).
+   - `unclutter -idle 3` — hides the mouse cursor after 3 seconds of inactivity (system-wide autostart).
 
 ## User Account Model
 
@@ -132,7 +136,7 @@ Additionally:
 - **XFCE4** with compositing enabled and a single workspace.
 - **Screen blanking** disabled by the kiosk script.
 - **Wallpaper** set system-wide (XFCE, LightDM, and GRUB) from `assets/wallpaper.png`.
-- **`unclutter`** is included in the package list to hide the mouse cursor after inactivity.
+- **`unclutter`** hides the mouse cursor after **3 seconds** of inactivity. It is started automatically at login via an XDG autostart entry (`/etc/xdg/autostart/unclutter.desktop`) which runs `unclutter -idle 3`.
 
 ## LightDM Display Manager
 
@@ -188,6 +192,98 @@ sudo journalctl -xe
 
 # Switch to root shell
 sudo -i
+```
+
+## Time Synchronization
+
+DisplayOS uses **systemd-timesyncd** for automatic NTP time synchronization. The service is enabled during build and starts on every boot.
+
+### How It Works
+
+- `systemd-timesyncd` is a lightweight NTP client built into systemd.
+- It is enabled as a system service via the `072-timesyncd.chroot` build hook.
+- NTP servers are pre-configured in `/etc/systemd/timesyncd.conf.d/displayos.conf` using the Debian NTP pool.
+- The system clock is synchronized automatically when a network connection is available.
+
+### Checking Sync Status
+
+```bash
+timedatectl status
+```
+
+Example output:
+
+```
+               Local time: Mon 2025-08-04 17:41:21 EEST
+           Universal time: Mon 2025-08-04 14:41:21 UTC
+                 RTC time: Mon 2025-08-04 14:41:21
+                Time zone: Europe/Bucharest (EEST, +0300)
+System clock synchronized: yes
+              NTP service: active
+          RTC in local TZ: no
+```
+
+Key fields to check:
+- **System clock synchronized: yes** — the clock has been synced with an NTP server.
+- **NTP service: active** — `systemd-timesyncd` is running.
+
+### Enabling NTP Sync Manually
+
+If NTP sync is disabled on a running system, re-enable it with:
+
+```bash
+sudo timedatectl set-ntp true
+```
+
+To disable it (not recommended for kiosk use):
+
+```bash
+sudo timedatectl set-ntp false
+```
+
+### Checking the Service
+
+```bash
+# View service status
+sudo systemctl status systemd-timesyncd
+
+# View detailed sync information (NTP server, stratum, offset)
+timedatectl show-timesync --all
+```
+
+### Changing the Time Zone
+
+```bash
+# List all available time zones
+timedatectl list-timezones
+
+# Set a time zone
+sudo timedatectl set-timezone Europe/Paris
+
+# Examples
+sudo timedatectl set-timezone America/New_York
+sudo timedatectl set-timezone Asia/Tokyo
+sudo timedatectl set-timezone UTC
+```
+
+The time zone can also be set at build time via `TIMEZONE` in `config.env` (default: `Europe/Oslo`). This sets the time zone during installation without needing to run `timedatectl` manually.
+
+### Custom NTP Servers
+
+The default NTP server configuration is in `/etc/systemd/timesyncd.conf.d/displayos.conf`:
+
+```ini
+[Time]
+NTP=0.debian.pool.ntp.org 1.debian.pool.ntp.org 2.debian.pool.ntp.org 3.debian.pool.ntp.org
+FallbackNTP=0.pool.ntp.org 1.pool.ntp.org
+```
+
+To use custom NTP servers on a running system:
+
+```bash
+sudo nano /etc/systemd/timesyncd.conf.d/displayos.conf
+# Edit the NTP= line with your preferred servers
+sudo systemctl restart systemd-timesyncd
 ```
 
 ## Related Docs
